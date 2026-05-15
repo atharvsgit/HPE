@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NETRA - Enterprise Data Quality</title>
+    <link rel="icon" href="/logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #020617;
+            --bg-card: #0f172a;
+            --bg-card-hover: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: #1e293b;
+            --accent: #0ea5e9;
+            --accent-hover: #0284c7;
+            --cyan: #22d3ee;
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+        }
+
+        .header {
+            margin-bottom: 2rem;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .netra-logo {
+            height: 120px;
+            margin-bottom: 1rem;
+            filter: drop-shadow(0 0 15px rgba(34, 211, 238, 0.4));
+            transition: filter 0.3s ease;
+        }
+        
+        .netra-logo:hover {
+            filter: drop-shadow(0 0 25px rgba(34, 211, 238, 0.7));
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(to right, var(--cyan), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+            letter-spacing: 2px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+        }
+
+        /* Pipeline Visualization */
+        .pipeline-vis {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .pipeline-step {
+            background-color: var(--bg-card);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+        
+        .pipeline-arrow {
+            color: var(--border-color);
+        }
+
+        /* Dashboard Widgets */
+        .widgets {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+            width: 100%;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .widget-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .widget-title {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .widget-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .status-idle { background-color: var(--text-secondary); }
+        .status-processing { background-color: var(--warning); animation: pulse 1.5s infinite; }
+        .status-success { background-color: var(--success); }
+        .status-error { background-color: var(--error); }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* Main Grid */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            flex-grow: 1;
+        }
+
+        @media (min-width: 900px) {
+            .main-container {
+                grid-template-columns: 400px 1fr;
+            }
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-header {
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        
+        .card-title:hover {
+            color: var(--accent);
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        /* Drag and Drop Zone */
+        .drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 0.75rem;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background-color: rgba(15, 23, 42, 0.5);
+            margin-bottom: 1.5rem;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent);
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+
+        .drop-zone-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .file-info {
+            display: none;
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background-color: var(--bg-base);
+            border-radius: 0.5rem;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+        
+        .file-info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .file-info-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .file-label { color: var(--text-secondary); }
+        .file-value { color: var(--text-primary); font-weight: 500; word-break: break-all; }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        button.primary-btn {
+            background: linear-gradient(135deg, var(--accent), #3b82f6);
+            color: white;
+            border: none;
+            padding: 0.875rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 15px -3px rgba(14, 165, 233, 0.4);
+        }
+
+        button.primary-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, var(--accent-hover), #2563eb);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px -3px rgba(14, 165, 233, 0.6);
+        }
+
+        button.primary-btn:disabled {
+            background-color: var(--border-color);
+            color: var(--text-secondary);
+            cursor: not-allowed;
+        }
+
+        /* Spinner */
+        .spinner {
+            display: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Results Panel */
+        .results-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .results-empty svg {
+            width: 4rem;
+            height: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.2;
+        }
+
+        .results-content {
+            display: none;
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .result-card {
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            position: relative;
+        }
+
+        .result-card .label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+            letter-spacing: 0.05em;
+        }
+
+        .result-card .value {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            transition: all 0.2s;
+        }
+        
+        .copy-btn:hover {
+            color: var(--text-primary);
+            background-color: var(--border-color);
+        }
+
+        .json-preview {
+            background-color: #0d1117;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.875rem;
+            color: #e2e8f0;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Toasts */
+        .toast-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 50;
+        }
+
+        .toast {
+            min-width: 300px;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            transform: translateX(120%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-left: 4px solid var(--border-color);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success { border-left-color: var(--success); }
+        .toast.error { border-left-color: var(--error); }
+        .toast.info { border-left-color: var(--accent); }
+        
+        .top-nav {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+        }
+        .top-nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+            background: var(--bg-card);
+        }
+        .top-nav a:hover {
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        button.secondary-btn {
+            background-color: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            padding: 0.875rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+        button.secondary-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-secondary);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="top-nav">
+        <a href="/docs" target="_blank">View API Docs ↗</a>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+        <img src="/logo.png" alt="NETRA Logo" class="netra-logo">
+        <h1>NETRA</h1>
+        <p>Enterprise Data Quality & Validation Platform</p>
+        
+        <div class="pipeline-vis">
+            <div class="pipeline-step" id="step-upload" style="border-color: var(--accent); color: white;">Upload</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step" id="step-metadata">Metadata</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step" id="step-profiling">Profiling</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step" id="step-validation">Validation</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step" id="step-reports">Reports</div>
+        </div>
+    </div>
+
+    <!-- Dashboard Widgets -->
+    <div class="widgets">
+        <div class="widget-card">
+            <div class="widget-title">Total Datasets</div>
+            <div class="widget-value" id="wdg-total">0</div>
+        </div>
+        <div class="widget-card">
+            <div class="widget-title">Last Ingestion</div>
+            <div class="widget-value" id="wdg-time" style="font-size: 1.25rem;">-</div>
+        </div>
+        <div class="widget-card">
+            <div class="widget-title">Latest Batch ID</div>
+            <div class="widget-value" id="wdg-batch" style="font-size: 1.1rem; font-family: monospace;">-</div>
+        </div>
+        <div class="widget-card">
+            <div class="widget-title">Pipeline Status</div>
+            <div class="widget-value" style="font-size: 1.1rem; display: flex; align-items: center;">
+                <span class="status-dot status-idle" id="wdg-status-dot"></span>
+                <span id="wdg-status-text">Idle</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="main-container">
+        <!-- Upload Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title" onclick="resetForm()" title="Click to start a new ingestion">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    New Ingestion
+                </h2>
+            </div>
+            
+            <form id="ingestion-form">
+                <div class="form-group">
+                    <label for="dataset_name">Logical Dataset Name</label>
+                    <input type="text" id="dataset_name" name="dataset_name" placeholder="e.g., enterprise_sales_v1" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Source Payload (CSV)</label>
+                    <div class="drop-zone" id="drop-zone">
+                        <div class="drop-zone-icon">📄</div>
+                        <p style="color: var(--text-primary); font-weight: 500; margin-bottom: 0.25rem;">Drag & drop your CSV here</p>
+                        <p style="color: var(--text-secondary); font-size: 0.875rem;">or click to browse from local filesystem</p>
+                        <input type="file" id="file" name="file" accept=".csv" required>
+                    </div>
+                    
+                    <div class="file-info" id="file-info">
+                        <div class="file-info-row">
+                            <span class="file-label">Filename:</span>
+                            <span class="file-value" id="info-name">-</span>
+                        </div>
+                        <div class="file-info-row">
+                            <span class="file-label">Size:</span>
+                            <span class="file-value" id="info-size">-</span>
+                        </div>
+                        <div class="file-info-row">
+                            <span class="file-label">Status:</span>
+                            <span class="file-value" style="color: var(--warning)">Pending Upload</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button type="button" class="secondary-btn" onclick="resetForm()">Reset</button>
+                    <button type="submit" id="submit-btn" class="primary-btn">
+                        <div class="spinner" id="btn-spinner"></div>
+                        <span id="btn-text">Execute Pipeline</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                    Pipeline Telemetry
+                </h2>
+            </div>
+
+            <!-- Empty State -->
+            <div class="results-empty" id="results-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <p>No active pipeline telemetry.</p>
+                <p style="font-size: 0.875rem; margin-top: 0.5rem;">Execute an ingestion to view live observability metrics.</p>
+            </div>
+
+            <!-- Content State -->
+            <div class="results-content" id="results-content">
+                <div class="result-grid">
+                    <div class="result-card">
+                        <div class="label">Batch ID</div>
+                        <div class="value" id="res-batch">-</div>
+                        <button class="copy-btn" onclick="copyToClipboard('res-batch')" title="Copy ID">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+                    </div>
+                    <div class="result-card">
+                        <div class="label">Dataset Node</div>
+                        <div class="value" id="res-dataset">-</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="label">Rows Processed</div>
+                        <div class="value" id="res-rows">-</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="label">Physical Path</div>
+                        <div class="value" id="res-path" style="font-size: 0.85rem;">-</div>
+                        <button class="copy-btn" onclick="copyToClipboard('res-path')" title="Copy Path">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.875rem; font-weight: 500;">Raw JSON Response</div>
+                <div class="json-preview" id="res-json"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // DOM Elements
+        const form = document.getElementById('ingestion-form');
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file');
+        const fileInfo = document.getElementById('file-info');
+        const infoName = document.getElementById('info-name');
+        const infoSize = document.getElementById('info-size');
+        const submitBtn = document.getElementById('submit-btn');
+        const btnSpinner = document.getElementById('btn-spinner');
+        const btnText = document.getElementById('btn-text');
+        
+        // Results Elements
+        const resultsEmpty = document.getElementById('results-empty');
+        const resultsContent = document.getElementById('results-content');
+        
+        // Widgets Elements
+        let totalDatasets = localStorage.getItem('hpe_total_datasets') ? parseInt(localStorage.getItem('hpe_total_datasets')) : 0;
+        document.getElementById('wdg-total').innerText = totalDatasets;
+
+        // --- Formatters ---
+        function formatBytes(bytes, decimals = 2) {
+            if (!+bytes) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        }
+
+        function formatTime() {
+            return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' });
+        }
+
+        // --- Toasts ---
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            let icon = 'ℹ️';
+            if(type === 'success') icon = '✅';
+            if(type === 'error') icon = '🚨';
+            
+            toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+            container.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => toast.classList.add('show'), 10);
+            
+            // Auto remove
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // --- File Drag & Drop Logic ---
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            if (dt.files && dt.files.length) {
+                fileInput.files = dt.files;
+                handleFileSelection();
+            }
+        });
+
+        fileInput.addEventListener('change', handleFileSelection);
+
+        function handleFileSelection() {
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                if(!file.name.endsWith('.csv')) {
+                    showToast('Only CSV files are supported.', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+                infoName.innerText = file.name;
+                infoSize.innerText = formatBytes(file.size);
+                fileInfo.style.display = 'block';
+                dropZone.style.display = 'none';
+                
+                // Auto-fill dataset name if empty
+                const dsInput = document.getElementById('dataset_name');
+                if(!dsInput.value) {
+                    dsInput.value = file.name.replace('.csv', '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+                }
+            }
+        }
+
+        // --- Clipboard ---
+        window.copyToClipboard = function(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard', 'success');
+            });
+        }
+
+        // --- Reset Form Logic ---
+        window.resetForm = function() {
+            form.reset();
+            fileInput.value = '';
+            fileInfo.style.display = 'none';
+            dropZone.style.display = 'block';
+            document.getElementById('dataset_name').value = '';
+            
+            resultsEmpty.style.display = 'flex';
+            resultsContent.style.display = 'none';
+            
+            document.getElementById('wdg-status-dot').className = 'status-dot status-idle';
+            document.getElementById('wdg-status-text').innerText = 'Idle';
+            
+            updatePipelineViz(-1);
+            
+            showToast('Form reset for new ingestion.', 'info');
+        }
+
+        // --- Pipeline Visualizer ---
+        function updatePipelineViz(stepIndex) {
+            const steps = ['step-upload', 'step-metadata', 'step-profiling', 'step-validation', 'step-reports'];
+            steps.forEach((id, idx) => {
+                const el = document.getElementById(id);
+                if(idx < stepIndex) {
+                    el.style.borderColor = 'var(--success)';
+                    el.style.color = 'var(--success)';
+                } else if (idx === stepIndex) {
+                    el.style.borderColor = 'var(--accent)';
+                    el.style.color = 'white';
+                } else {
+                    el.style.borderColor = 'var(--border-color)';
+                    el.style.color = 'var(--text-secondary)';
+                }
+            });
+        }
+
+        // --- Form Submission ---
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const datasetName = document.getElementById('dataset_name').value;
+            
+            if (!fileInput.files.length) {
+                showToast('Please select a CSV file payload.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            // STRICTLY PRESERVING API PATH AS REQUESTED
+            const targetUrl = `/ingestion/csv?dataset_name=${encodeURIComponent(datasetName)}`;
+
+            // UI Loading State
+            submitBtn.disabled = true;
+            btnSpinner.style.display = 'block';
+            btnText.innerText = 'Orchestrating...';
+            
+            // Widget Loading State
+            document.getElementById('wdg-status-dot').className = 'status-dot status-processing';
+            document.getElementById('wdg-status-text').innerText = 'Processing';
+            
+            updatePipelineViz(1); // Moving past upload
+
+            try {
+                // Simulate pipeline steps for UI UX
+                setTimeout(() => updatePipelineViz(2), 800);
+                
+                const response = await fetch(targetUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updatePipelineViz(4); // Reach reports
+                    showToast('Ingestion pipeline completed successfully', 'success');
+                    
+                    // Update Widgets
+                    totalDatasets++;
+                    localStorage.setItem('hpe_total_datasets', totalDatasets);
+                    document.getElementById('wdg-total').innerText = totalDatasets;
+                    document.getElementById('wdg-time').innerText = formatTime();
+                    document.getElementById('wdg-batch').innerText = data.batch_id || 'UNKNOWN';
+                    
+                    document.getElementById('wdg-status-dot').className = 'status-dot status-success';
+                    document.getElementById('wdg-status-text').innerText = 'Healthy';
+
+                    // Update Results Panel
+                    resultsEmpty.style.display = 'none';
+                    resultsContent.style.display = 'block';
+                    
+                    document.getElementById('res-batch').innerText = data.batch_id || 'N/A';
+                    document.getElementById('res-dataset').innerText = data.dataset_name || datasetName;
+                    document.getElementById('res-rows').innerText = data.row_count ? data.row_count.toLocaleString() : 'N/A';
+                    document.getElementById('res-path').innerText = data.output_path || data.parquet_path || 'N/A';
+                    document.getElementById('res-json').innerText = JSON.stringify(data, null, 2);
+                    
+                } else {
+                    throw new Error(data.detail || 'Pipeline validation failed');
+                }
+            } catch (error) {
+                updatePipelineViz(0);
+                showToast(error.message, 'error');
+                
+                document.getElementById('wdg-status-dot').className = 'status-dot status-error';
+                document.getElementById('wdg-status-text').innerText = 'Failed';
+                
+                resultsEmpty.style.display = 'none';
+                resultsContent.style.display = 'block';
+                document.getElementById('res-json').innerText = JSON.stringify({ error: error.message }, null, 2);
+            } finally {
+                // UI Reset
+                submitBtn.disabled = false;
+                btnSpinner.style.display = 'none';
+                btnText.innerText = 'Execute Pipeline';
+                
+                // Reset file selection implicitly via label info
+                fileInfo.querySelector('.file-value:last-child').innerText = 'Completed';
+                fileInfo.querySelector('.file-value:last-child').style.color = 'var(--success)';
+            }
+        });
+    </script>
+</body>
+</html>
