@@ -7,3 +7,15 @@ pytest==8.3.4
 pytest-asyncio==0.25.0
 SQLAlchemy==2.0.36
 uvicorn[standard]==0.34.0
+
+# --- Platform Intelligence (Manjunath Patil) ---
+prefect==3.7.0
+polars==1.40.1
+sqlglot==30.8.0
+scikit-learn==1.8.0
+scipy>=1.14.0
+evidently==0.7.21
+pandas==3.0.3
+numpy==2.4.5
+google-genai==2.3.0
+loguru==0.7.3
