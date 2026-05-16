@@ -1,0 +1,53 @@
+services:
+  api:
+    build: .
+    container_name: dq_api
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      STATEMENT_TIMEOUT_MS: 15000
+    ports:
+      - "8000:8000"
+
+  scheduler:
+    build: .
+    container_name: dq_scheduler
+    env_file:
+      - .env
+    command: python -m app.daemon.scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      STATEMENT_TIMEOUT_MS: 15000
+      RULE_EXECUTION_JITTER_SECONDS: ${RULE_EXECUTION_JITTER_SECONDS:-120}
+
+  postgres:
+    image: postgres:16
+    container_name: dq_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      DQ_APP_PASSWORD: ${DQ_APP_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dq_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
