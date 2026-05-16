@@ -11,7 +11,7 @@ CREATE SCHEMA IF NOT EXISTS dq_platform;
 -- ---------------------------------------------------------------------------
 -- pipeline_runs: tracks each full Prefect pipeline execution
 -- ---------------------------------------------------------------------------
-CREATE TABLE dq_platform.pipeline_runs (
+CREATE TABLE IF NOT EXISTS dq_platform.pipeline_runs (
     run_id        BIGSERIAL PRIMARY KEY,
     table_name    TEXT NOT NULL,
     status        TEXT NOT NULL
@@ -25,7 +25,7 @@ CREATE TABLE dq_platform.pipeline_runs (
 -- ---------------------------------------------------------------------------
 -- dataset_profiles: profiling results produced by the Polars-based engine
 -- ---------------------------------------------------------------------------
-CREATE TABLE dq_platform.dataset_profiles (
+CREATE TABLE IF NOT EXISTS dq_platform.dataset_profiles (
     profile_id    BIGSERIAL PRIMARY KEY,
     run_id        BIGINT REFERENCES dq_platform.pipeline_runs(run_id) ON DELETE SET NULL,
     table_name    TEXT NOT NULL,
@@ -44,7 +44,7 @@ CREATE INDEX idx_profiles_run   ON dq_platform.dataset_profiles(run_id);
 -- ---------------------------------------------------------------------------
 -- rule_suggestions: heuristic or LLM-generated rule candidates
 -- ---------------------------------------------------------------------------
-CREATE TABLE dq_platform.rule_suggestions (
+CREATE TABLE IF NOT EXISTS dq_platform.rule_suggestions (
     suggestion_id         BIGSERIAL PRIMARY KEY,
     profile_id            BIGINT REFERENCES dq_platform.dataset_profiles(profile_id) ON DELETE SET NULL,
     table_name            TEXT NOT NULL,
@@ -66,7 +66,7 @@ CREATE INDEX idx_suggestions_applied ON dq_platform.rule_suggestions(applied);
 -- ---------------------------------------------------------------------------
 -- anomaly_results: per-column anomaly detection outputs
 -- ---------------------------------------------------------------------------
-CREATE TABLE dq_platform.anomaly_results (
+CREATE TABLE IF NOT EXISTS dq_platform.anomaly_results (
     anomaly_id    BIGSERIAL PRIMARY KEY,
     run_id        BIGINT REFERENCES dq_platform.pipeline_runs(run_id) ON DELETE SET NULL,
     table_name    TEXT NOT NULL,
@@ -84,7 +84,7 @@ CREATE INDEX idx_anomalies_table ON dq_platform.anomaly_results(table_name);
 -- ---------------------------------------------------------------------------
 -- drift_results: per-column Evidently drift outputs
 -- ---------------------------------------------------------------------------
-CREATE TABLE dq_platform.drift_results (
+CREATE TABLE IF NOT EXISTS dq_platform.drift_results (
     drift_id          BIGSERIAL PRIMARY KEY,
     run_id            BIGINT REFERENCES dq_platform.pipeline_runs(run_id) ON DELETE SET NULL,
     reference_table   TEXT NOT NULL,

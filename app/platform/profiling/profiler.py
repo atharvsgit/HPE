@@ -24,15 +24,18 @@ class ProfilerError(Exception):
     """Raised when profiling fails due to a data or query error."""
 
 
-async def profile_table(table_name: str) -> dict:
+async def profile_table(table_name: str, row_limit: int | None = None) -> dict:
     """
-    Profile *table_name* by reading up to ``settings.profiling_row_limit`` rows
-    and running all profiling sub-analyzers.
+    Profile *table_name* by reading up to *row_limit* rows (or
+    ``settings.profiling_row_limit`` if not specified) and running all
+    profiling sub-analyzers.
 
     Args:
         table_name: Fully-qualified table name, e.g. ``business_data.employees``.
                     Must reference an existing table accessible to the ``dq_app``
                     role.
+        row_limit:  Optional per-request override. If None, falls back to
+                    ``settings.profiling_row_limit``.
 
     Returns:
         A profile dict as produced by :func:`generate_statistics`.
@@ -41,8 +44,8 @@ async def profile_table(table_name: str) -> dict:
         ProfilerError: If the table cannot be queried or is completely empty.
     """
     settings = get_settings()
-    row_limit = settings.profiling_row_limit
-    log.info("Starting profile for '{t}' (limit={lim})", t=table_name, lim=row_limit)
+    effective_limit = row_limit if (row_limit is not None and row_limit > 0) else settings.profiling_row_limit
+    log.info("Starting profile for '{t}' (limit={lim})", t=table_name, lim=effective_limit)
 
     # ------------------------------------------------------------------
     # Validate table name to prevent SQL injection.
@@ -50,7 +53,7 @@ async def profile_table(table_name: str) -> dict:
     # ------------------------------------------------------------------
     _validate_table_name(table_name)
 
-    query = f"SELECT * FROM {table_name} LIMIT {row_limit}"  # noqa: S608
+    query = f"SELECT * FROM {table_name} LIMIT {effective_limit}"  # noqa: S608
 
     try:
         async with metadata_engine.connect() as conn:

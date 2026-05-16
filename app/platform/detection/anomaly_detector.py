@@ -165,10 +165,13 @@ async def _load_column(table_name: str, column_name: str) -> pd.Series:
             f"Invalid table name '{table_name}'."
         )
 
-    sql = f"SELECT {column_name} FROM {table_name}"  # noqa: S608
+    # Fix (Copilot): apply row limit to prevent OOM on large tables
+    settings = get_settings()
+    row_limit = settings.profiling_row_limit
+    sql = f"SELECT {column_name} FROM {table_name} LIMIT :row_limit"  # noqa: S608
     try:
         async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(sql))
+            result = await conn.execute(text(sql), {"row_limit": row_limit})
             rows = result.fetchall()
     except Exception as exc:
         raise AnomalyDetectorError(

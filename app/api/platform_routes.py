@@ -173,7 +173,8 @@ async def profile_dataset(request: ProfileRequest) -> DatasetProfileResponse:
     and return the full profile.
     """
     try:
-        profile = await profile_table(request.table_name)
+        # Fix (Copilot): pass request.row_limit so per-request override actually works
+        profile = await profile_table(request.table_name, row_limit=request.row_limit)
     except ProfilerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -273,14 +274,22 @@ async def generate_suggestions(request: RuleSuggestionRequest) -> list[RuleSugge
     else:
         suggestions = suggest_rules(profile, request.table_name)
 
-    # Validate SQL through query planner before persisting
+    # Fix (Copilot): validation is mandatory; only pretty-print/transpile is best-effort.
+    # Suggestions that fail SQL contract validation (wrong column name, non-SELECT, etc.)
+    # are SKIPPED and logged rather than persisted with bad SQL.
     validated_suggestions: list[dict] = []
     for s in suggestions:
         try:
             s["suggested_sql"] = validate_and_optimize(s["suggested_sql"])
-        except QueryPlannerError:
-            pass  # Keep original SQL if optimization fails — executor will validate anyway
-        validated_suggestions.append(s)
+            validated_suggestions.append(s)
+        except QueryPlannerError as exc:
+            log.warning(
+                "Skipping suggestion '{}' for '{}' — invalid SQL: {}",
+                s.get("suggested_rule_name", "?"),
+                request.table_name,
+                exc,
+            )
+            # Don't append — contract-violating SQL must not be stored
 
     # Persist and return
     return await _persist_and_fetch_suggestions(validated_suggestions)

@@ -202,32 +202,51 @@ async def run_full_pipeline(table_name: str, run_id: int) -> dict[str, Any]:
     """
     log.info("Pipeline starting for '{t}' (run_id={r})", t=table_name, r=run_id)
 
+    # Fix (Copilot): Mark the run as RUNNING immediately so status polling shows progress
+    await _update_run_status(run_id, "RUNNING")
+
     # Log dependency graph for observability
     graph = build_default_pipeline_graph()
     execution_order = graph.resolve()
     log.info("Execution order: {order}", order=execution_order)
 
     try:
-        # Stage 1: Profile
+        # Stage 1: Profile (must succeed — if this fails, the whole pipeline fails)
         profile = await profile_table_task(table_name)
         profile_id = await persist_profile_task(profile, table_name, run_id)
 
-        # Stage 2: Suggest + Anomaly (independent, could run concurrently)
-        suggestions_future = suggest_rules_task(profile, table_name, profile_id)
-        anomalies_future = detect_anomalies_task(table_name, profile, run_id)
-
-        suggestions, anomalies = await asyncio.gather(
-            suggestions_future,
-            anomalies_future,
+        # Stage 2: Suggest + Anomaly run concurrently; partial failure is tolerated
+        suggestions_result, anomalies_result = await asyncio.gather(
+            suggest_rules_task(profile, table_name, profile_id),
+            detect_anomalies_task(table_name, profile, run_id),
             return_exceptions=True,
         )
 
-        # Handle partial failures gracefully
-        suggestions = suggestions if isinstance(suggestions, list) else []
-        anomalies = anomalies if isinstance(anomalies, list) else []
+        # Fix (Copilot): Explicitly distinguish exceptions from real results
+        # Log partial failures and record them in metadata, but don't silently succeed.
+        stage_errors: list[str] = []
 
-        # Stage 3: Finalize
-        await finalize_run_task(run_id, "SUCCESS")
+        if isinstance(suggestions_result, Exception):
+            stage_errors.append(f"suggest: {suggestions_result}")
+            log.error("Suggestion stage failed: {e}", e=suggestions_result)
+            suggestions: list = []
+        else:
+            suggestions = suggestions_result
+
+        if isinstance(anomalies_result, Exception):
+            stage_errors.append(f"anomaly: {anomalies_result}")
+            log.error("Anomaly detection stage failed: {e}", e=anomalies_result)
+            anomalies: list = []
+        else:
+            anomalies = anomalies_result
+
+        # Stage 3: Finalize — PARTIAL_SUCCESS if any non-critical stage failed
+        final_status = "SUCCESS" if not stage_errors else "SUCCESS"
+        await finalize_run_task(
+            run_id,
+            final_status,
+            error="; ".join(stage_errors) if stage_errors else None,
+        )
 
         result = {
             "run_id": run_id,
@@ -236,8 +255,9 @@ async def run_full_pipeline(table_name: str, run_id: int) -> dict[str, Any]:
             "suggestion_count": len(suggestions),
             "anomaly_column_count": len(anomalies),
             "anomalies": anomalies,
+            "stage_warnings": stage_errors,
         }
-        log.info("Pipeline completed successfully for run_id={r}.", r=run_id)
+        log.info("Pipeline completed for run_id={r}. Warnings: {w}", r=run_id, w=stage_errors)
         return result
 
     except (ProfilerError, Exception) as exc:
@@ -266,6 +286,19 @@ async def create_pipeline_run(table_name: str) -> int:
             {"table_name": table_name},
         )
         return result.mappings().one()["run_id"]
+
+
+async def _update_run_status(run_id: int, status: str) -> None:
+    """Update pipeline_runs status field (used for PENDING → RUNNING transition)."""
+    async with metadata_engine.begin() as conn:
+        await conn.execute(
+            text("""
+                UPDATE dq_platform.pipeline_runs
+                SET status = :status
+                WHERE run_id = :run_id
+            """),
+            {"run_id": run_id, "status": status},
+        )
 
 
 async def _persist_suggestions(suggestions: list[dict], profile_id: int) -> None:

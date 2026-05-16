@@ -121,6 +121,16 @@ def compile_rule_to_sql(rule_config: dict) -> str:
     if not table:
         raise QueryPlannerError("rule_config must include a non-empty 'table' field.")
 
+    # Fix (Copilot): validate column is present for all column-level rule types
+    _COLUMN_REQUIRED_TYPES = {
+        "null_check", "not_null_required", "uniqueness_check",
+        "min_value", "max_value", "range_check",
+    }
+    if rule_type in _COLUMN_REQUIRED_TYPES and not column:
+        raise QueryPlannerError(
+            f"rule_type '{rule_type}' requires a non-empty 'column' field."
+        )
+
     sql = _build_sql(rule_type, table, column, rule_config)
     log.debug("Compiled rule_type='{t}' to SQL.", t=rule_type)
     return sql
@@ -190,11 +200,11 @@ def _build_sql(rule_type: str, table: str, column: str, cfg: dict) -> str:
                 f"SELECT COUNT(*) AS violation_count "
                 f"FROM {table} WHERE {column} < {min_val} OR {column} > {max_val}"
             )
-        case "row_count_min":
-            min_count = _require_param(cfg, "row_count_min")
-            return f"SELECT COUNT(*) AS observed_value FROM {table}"
-        case "row_count_max":
-            max_count = _require_param(cfg, "row_count_max")
+        case "row_count_min" | "row_count_max":
+            # Fix (Copilot): row_count_min/max thresholds are evaluated by the
+            # executor using expected_result_value (min_threshold / max_threshold).
+            # The SQL simply reports the observed row count; the caller sets
+            # expected_result_type and expected_result_value accordingly.
             return f"SELECT COUNT(*) AS observed_value FROM {table}"
         case _:
             raise QueryPlannerError(f"Unhandled rule_type: '{rule_type}'")

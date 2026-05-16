@@ -22,6 +22,8 @@ Usage::
 """
 from __future__ import annotations
 
+from collections import deque
+
 from app.platform.logger import get_logger
 
 log = get_logger(__name__)
@@ -72,29 +74,25 @@ class TaskGraph:
         Raises:
             CyclicDependencyError: If the graph contains a cycle.
         """
-        # Compute in-degree for each node
-        in_degree: dict[str, int] = {n: 0 for n in self._nodes}
-        for node, deps in self._dependencies.items():
-            for dep in deps:
-                in_degree[node] = in_degree.get(node, 0)
-            # Each dependency points into 'node'
-            _ = node  # used below
+        # Fix (Copilot): Removed redundant in-degree pre-pass. Build both
+        # data structures in a single clean pass, then run Kahn's BFS with
+        # a deque (O(1) popleft instead of O(n) list.pop(0)).
 
-        # Rebuild: for each dep → list of nodes that depend on it
+        # For each dep → list of nodes that depend on it
         dependents: dict[str, list[str]] = {n: [] for n in self._nodes}
         for node, deps in self._dependencies.items():
             for dep in deps:
                 dependents.setdefault(dep, []).append(node)
 
-        # Recalculate in_degree correctly
+        # In-degree = number of direct dependencies
         in_degree = {n: len(self._dependencies[n]) for n in self._nodes}
 
-        # Kahn's BFS
-        queue = [n for n in self._nodes if in_degree[n] == 0]
+        # Kahn's BFS using deque for O(1) popleft
+        queue: deque[str] = deque(n for n in self._nodes if in_degree[n] == 0)
         sorted_tasks: list[str] = []
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             sorted_tasks.append(node)
             for dependent in dependents.get(node, []):
                 in_degree[dependent] -= 1

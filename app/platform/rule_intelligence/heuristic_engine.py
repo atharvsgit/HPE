@@ -122,8 +122,13 @@ def suggest_rules(profile: dict, table_name: str) -> list[dict]:
         if dtype in ("string", "categorical") and 2 <= unique_count <= _MAX_CATEGORY_UNIQUE:
             top_values = stats.get("top_values", [])
             if top_values:
+                # Fix (Copilot): escape single quotes in string values to prevent
+                # SQL injection / syntax errors (e.g. O'Reilly → O''Reilly)
+                def _escape(v: str) -> str:
+                    return v.replace("'", "''")
+
                 categories = ", ".join(
-                    f"'{v['value']}'" for v in top_values if v.get("value") is not None
+                    f"'{_escape(str(v['value']))}'" for v in top_values if v.get("value") is not None
                 )
                 if categories:
                     suggestions.append(_make_suggestion(
