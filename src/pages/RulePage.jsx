@@ -7,13 +7,8 @@ export default function RulePage() {
   const { selectedDataset, schemaMetadata, validationResults } = useDataset();
   const datasetStatus = validationResults
     ? {
-        label: 'Validation Completed',
-        tone:
-          (validationResults.summary?.failedRows ||
-            validationResults.failedRows?.length ||
-            0) > 0
-            ? 'error'
-            : 'success',
+        label: 'Rule Completed',
+        tone: 'success',
       }
     : selectedDataset
       ? {
@@ -37,12 +32,11 @@ export default function RulePage() {
               </StatusBadge>
             </div>
             <h3 className="mt-3 text-2xl font-semibold text-white">
-              Author validation logic against live schema metadata
+              Enter rules and get matching rows
             </h3>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-              Select a column from the ingested schema, configure the desired
-              rule, and submit a clean payload to `/run-validation`. Failed rows
-              are rendered with severity cues for fast triage.
+              Use natural language, SQL, or the schema-aware builder. Each run
+              checks the active dataset and returns the rows that match your rule.
             </p>
           </div>
 
@@ -73,10 +67,10 @@ export default function RulePage() {
         <section className="glass-panel p-6">
           <div className="empty-state">
             <p className="text-lg font-semibold text-white">
-              Upload a dataset to start validation
+              Connect a dataset to start validation
             </p>
             <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Connect a dataset on the ingestion page first so the rule builder
+              Connect a dataset on the dataset workspace first so the rule builder
               can load schema-aware columns, available rule types, and row-level
               validation results.
             </p>
@@ -84,7 +78,7 @@ export default function RulePage() {
               to="/"
               className="primary-button mt-6"
             >
-              Go to Dataset Intake
+              Go to Dataset Workspace
             </Link>
           </div>
         </section>

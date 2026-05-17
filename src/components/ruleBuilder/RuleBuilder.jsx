@@ -1,15 +1,11 @@
-import {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Editor from '@monaco-editor/react';
 import { Link } from 'react-router-dom';
 import Loader from '../common/Loader';
+import ResultTable from '../common/ResultTable';
 import StatusBadge from '../common/StatusBadge';
 import { useDataset } from '../../context/DatasetContext';
-import { runValidation } from '../../services/endpoints';
+import { createSavedRule, runAdHocRule } from '../../services/rulesApi';
 
 const ruleOptions = [
   {
@@ -33,19 +29,20 @@ const ruleOptions = [
     supportedLabel: 'All column types',
     tooltip: 'Not Null: checks that the selected column is populated in every inspected row.',
   },
+  {
+    id: 'equals',
+    label: 'Exact Match',
+    description: 'Matches a specific string or numeric value exactly.',
+    supportedLabel: 'String and Numeric columns',
+    tooltip: 'Exact Match: checks whether a value exactly equals the input.',
+  },
 ];
 
-const severityClasses = {
-  critical: 'border-rose-500/25 bg-rose-500/10 text-rose-100',
-  high: 'border-orange-400/25 bg-orange-400/10 text-orange-100',
-  medium: 'border-amber-400/25 bg-amber-400/10 text-amber-100',
-};
-
 const applicableRulesByType = {
-  numeric: ['between', 'not_null'],
-  string: ['regex', 'not_null'],
-  boolean: ['not_null'],
-  default: ['regex', 'not_null'],
+  numeric: ['between', 'not_null', 'equals'],
+  string: ['regex', 'not_null', 'equals'],
+  boolean: ['not_null', 'equals'],
+  default: ['regex', 'not_null', 'equals'],
 };
 
 const numericTypes = [
@@ -72,6 +69,71 @@ const stringTypes = [
   'datetime',
 ];
 
+const OPEN_ENDED_MAX = String(Number.MAX_SAFE_INTEGER);
+
+const escapeRegExp = (value = '') =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeColumnToken = (value = '') =>
+  String(value)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+const extractNumericValues = (value = '') =>
+  String(value).match(/-?\d+(\.\d+)?/g) || [];
+
+const findColumnFromInput = (input, schema = []) => {
+  const normalizedInput = normalizeColumnToken(input);
+
+  return [...schema]
+    .sort((left, right) => right.columnName.length - left.columnName.length)
+    .find((column) => {
+      const normalizedColumn = normalizeColumnToken(column.columnName);
+      const columnPattern = new RegExp(`\\b${escapeRegExp(normalizedColumn)}\\b`);
+
+      return columnPattern.test(normalizedInput);
+    });
+};
+
+const extractRegexPattern = (value = '') => {
+  const slashPatternMatch = value.match(/\/([^/]+)\/[gimsuy]*/);
+
+  if (slashPatternMatch?.[1]) {
+    return slashPatternMatch[1].trim();
+  }
+
+  const quotedPatternMatch = value.match(
+    /(?:match|regex)(?:\s+pattern)?\s+["'](.+?)["']/i,
+  );
+
+  if (quotedPatternMatch?.[1]) {
+    return quotedPatternMatch[1].trim();
+  }
+
+  const afterKeywordMatch = value.match(/(?:match|regex)(?:\s+pattern)?\s+(.+)$/i);
+
+  return afterKeywordMatch?.[1]?.trim() || '';
+};
+
+const getOpenEndedMax = (columnName, threshold, rows = []) => {
+  const numericValues = rows
+    .map((row) => Number(row?.[columnName]))
+    .filter((value) => Number.isFinite(value));
+
+  if (!numericValues.length) {
+    return OPEN_ENDED_MAX;
+  }
+
+  const currentMaximum = Math.max(...numericValues);
+
+  return currentMaximum > Number(threshold)
+    ? String(currentMaximum)
+    : OPEN_ENDED_MAX;
+};
+
 const getRuleLabel = (ruleId) =>
   ruleOptions.find((option) => option.id === ruleId)?.label || ruleId;
 
@@ -92,6 +154,68 @@ const toColumnTypeGroup = (dataType = '') => {
 
   return 'default';
 };
+
+const quoteIdentifier = (value = '') =>
+  `"${String(value).replace(/"/g, '""')}"`;
+
+const getDatasetSqlName = (dataset) =>
+  dataset?.tableName ||
+  dataset?.table ||
+  dataset?.name?.replace(/\.[^.]+$/, '').replace(/[^\w]+/g, '_') ||
+  'active_dataset';
+
+const buildSqlFromRule = ({
+  dataset,
+  column,
+  rule,
+  semanticMode,
+  params: ruleParams,
+}) => {
+  const tableName = quoteIdentifier(getDatasetSqlName(dataset));
+  const columnName = quoteIdentifier(column || 'column_name');
+
+  if (semanticMode === 'query') {
+    if (rule === 'between') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} BETWEEN ${ruleParams.min || 0} AND ${ruleParams.max || OPEN_ENDED_MAX};`;
+    }
+    if (rule === 'regex') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} ~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
+    }
+    if (rule === 'equals') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} = '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
+    }
+    return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NOT NULL;`;
+  } else {
+    if (rule === 'between') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} < ${ruleParams.min || 0}\n   OR ${columnName} > ${ruleParams.max || OPEN_ENDED_MAX};`;
+    }
+    if (rule === 'regex') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} !~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
+    }
+    if (rule === 'equals') {
+      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} != '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
+    }
+    return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL;`;
+  }
+};
+
+const toValidationResultsShape = (result, localPayload) => ({
+  summary: {
+    column: localPayload?.column || 'SQL result',
+    rule: result.ruleName,
+    checkedRows: result.checkedRows,
+    passedRows: result.passedRows,
+    failedRows: result.failedRows,
+    resultRows: result.resultRows ?? result.failedRows,
+    executionTime: result.duration,
+    executedAt: result.executionTime,
+    sql: result.sql,
+    status: result.status,
+  },
+  failedRows: result.rows,
+  resultRows: result.rows,
+  persistedResult: result,
+});
 
 function ResultSummaryCard({ label, value, hint }) {
   return (
@@ -115,16 +239,21 @@ export default function RuleBuilder() {
 
   const [selectedColumn, setSelectedColumn] = useState('');
   const [selectedRule, setSelectedRule] = useState('between');
+  const [semanticMode, setSemanticMode] = useState('query');
   const [params, setParams] = useState({
     min: '',
     max: '',
     pattern: '',
+    value: '',
   });
+  const [nlInput, setNlInput] = useState('');
+  const [ruleName, setRuleName] = useState('Business validation rule');
+  const [sqlText, setSqlText] = useState('');
+  const [activeAuthoringMode, setActiveAuthoringMode] = useState('assistant');
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [savingRule, setSavingRule] = useState(false);
   const [compatibilityNotice, setCompatibilityNotice] = useState('');
   const [resultsHighlighted, setResultsHighlighted] = useState(false);
-  const deferredSearchTerm = useDeferredValue(searchTerm);
   const resultsSectionRef = useRef(null);
   const resultsHighlightTimeoutRef = useRef(null);
 
@@ -154,6 +283,23 @@ export default function RuleBuilder() {
   const applicableRuleIds =
     applicableRulesByType[selectedColumnTypeGroup] ||
     applicableRulesByType.default;
+  const generatedSqlPreview = useMemo(
+    () =>
+      buildSqlFromRule({
+        dataset: selectedDataset,
+        column: selectedColumn,
+        rule: selectedRule,
+        semanticMode,
+        params,
+      }),
+    [params, selectedColumn, selectedDataset, selectedRule, semanticMode],
+  );
+
+  useEffect(() => {
+    if (!sqlText.trim() || activeAuthoringMode !== 'sql') {
+      setSqlText(generatedSqlPreview);
+    }
+  }, [activeAuthoringMode, generatedSqlPreview, sqlText]);
 
   useEffect(() => {
     if (!selectedColumnMeta || applicableRuleIds.includes(selectedRule)) {
@@ -256,24 +402,8 @@ export default function RuleBuilder() {
     !loading &&
     selectedDataset &&
     schemaMetadata.length > 0 &&
+    sqlText.trim() &&
     !primaryValidationMessage;
-
-  const filteredRows = useMemo(() => {
-    const rows = validationResults?.failedRows || [];
-    const normalizedSearch = deferredSearchTerm.trim().toLowerCase();
-
-    if (!normalizedSearch) {
-      return rows;
-    }
-
-    return rows.filter((row) =>
-      [row.rowId, row.column, row.message, row.value]
-        .filter(Boolean)
-        .some((field) =>
-          String(field).toLowerCase().includes(normalizedSearch),
-        ),
-    );
-  }, [deferredSearchTerm, validationResults]);
 
   const buildPayload = () => {
     if (primaryValidationMessage) {
@@ -284,6 +414,7 @@ export default function RuleBuilder() {
       dataset_id: selectedDataset?.id,
       column: selectedColumn,
       rule: selectedRule,
+      semanticMode: semanticMode,
     };
 
     if (selectedRule === 'between') {
@@ -301,7 +432,189 @@ export default function RuleBuilder() {
       };
     }
 
+    if (selectedRule === 'equals') {
+      return {
+        ...payload,
+        value: params.value.trim(),
+      };
+    }
+
     return payload;
+  };
+
+  const handleGenerateRule = () => {
+    const normalizedInput = nlInput.trim().toLowerCase();
+
+    if (!normalizedInput) {
+      pushToast({
+        tone: 'error',
+        title: 'Could not understand rule',
+        message: 'Describe a rule in plain English to auto-fill the builder.',
+      });
+      return;
+    }
+
+    const matchedColumn = findColumnFromInput(normalizedInput, schemaMetadata);
+
+    if (!matchedColumn) {
+      pushToast({
+        tone: 'error',
+        title: 'Column not recognized',
+        message: 'Try referencing a column name that appears in the dataset schema.',
+      });
+      return;
+    }
+
+    const nextParams = {
+      min: '',
+      max: '',
+      pattern: '',
+      value: '',
+    };
+    let nextRule = '';
+
+    if (
+      normalizedInput.includes('negative') ||
+      normalizedInput.includes('less than zero') ||
+      normalizedInput.includes('< 0')
+    ) {
+      nextRule = 'between';
+      nextParams.min = '0';
+      nextParams.max = getOpenEndedMax(matchedColumn.columnName, 0, datasetRows);
+    } else if (normalizedInput.includes('not null')) {
+      nextRule = 'not_null';
+    } else if (normalizedInput.includes('between')) {
+      const numericValues = extractNumericValues(normalizedInput);
+
+      if (numericValues.length < 2) {
+        pushToast({
+          tone: 'error',
+          title: 'Could not understand rule',
+          message: 'A between rule needs both a minimum and maximum value.',
+        });
+        return;
+      }
+
+      nextRule = 'between';
+      [nextParams.min, nextParams.max] = numericValues;
+    } else if (
+      normalizedInput.includes('greater than') ||
+      normalizedInput.includes('>')
+    ) {
+      const numericValues = extractNumericValues(normalizedInput);
+
+      if (!numericValues.length) {
+        pushToast({
+          tone: 'error',
+          title: 'Could not understand rule',
+          message: 'A greater-than rule needs a numeric threshold.',
+        });
+        return;
+      }
+
+      nextRule = 'between';
+      nextParams.min = numericValues[0];
+      nextParams.max = getOpenEndedMax(
+        matchedColumn.columnName,
+        numericValues[0],
+        datasetRows,
+      );
+    } else if (
+      normalizedInput.includes('less than') ||
+      normalizedInput.includes('<')
+    ) {
+      const numericValues = extractNumericValues(normalizedInput);
+
+      if (!numericValues.length) {
+        pushToast({
+          tone: 'error',
+          title: 'Could not understand rule',
+          message: 'A less-than rule needs a numeric threshold.',
+        });
+        return;
+      }
+
+      nextRule = 'between';
+      nextParams.min = numericValues[0];
+      nextParams.max = getOpenEndedMax(
+        matchedColumn.columnName,
+        numericValues[0],
+        datasetRows,
+      );
+    } else if (
+      normalizedInput.includes('match') ||
+      normalizedInput.includes('regex')
+    ) {
+      const pattern = extractRegexPattern(nlInput);
+
+      if (!pattern) {
+        pushToast({
+          tone: 'error',
+          title: 'Could not understand rule',
+          message: 'Include a regex pattern after match or regex.',
+        });
+        return;
+      }
+
+      nextRule = 'regex';
+      nextParams.pattern = pattern;
+    } else if (
+      normalizedInput.includes('is') ||
+      normalizedInput.includes('equal') ||
+      normalizedInput.includes('=')
+    ) {
+      const match = nlInput.match(/(?:is|equal(?:s)?(?: to)?|=)\s+([\w\s]+?)(?=\s|$)/i);
+      if (match) {
+        nextRule = 'equals';
+        nextParams.value = match[1].trim();
+      } else {
+        pushToast({
+          tone: 'error',
+          title: 'Could not understand rule',
+          message: 'Include a specific value to match after "is" or "equals".',
+        });
+        return;
+      }
+    } else {
+      pushToast({
+        tone: 'error',
+        title: 'Could not understand rule',
+        message: 'Try using phrases like between, not null, greater than, less than, or regex.',
+      });
+      return;
+    }
+
+    const isValidation = normalizedInput.includes('invalid') || normalizedInput.includes('violating') || normalizedInput.includes('fail');
+    setSemanticMode(isValidation ? 'validation' : 'query');
+
+    setSelectedColumn(matchedColumn.columnName);
+    setSelectedRule(nextRule);
+    setParams(nextParams);
+    setRuleName(
+      nlInput
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^show\s+/i, '')
+        .replace(/^find\s+/i, '')
+        .slice(0, 80) || 'Business validation rule',
+    );
+    setSqlText(
+      buildSqlFromRule({
+        dataset: selectedDataset,
+        column: matchedColumn.columnName,
+        rule: nextRule,
+        semanticMode: isValidation ? 'validation' : 'query',
+        params: nextParams,
+      }),
+    );
+    setActiveAuthoringMode('sql');
+    setCompatibilityNotice('');
+
+    pushToast({
+      tone: 'success',
+      title: 'Rule generated',
+      message: `The builder was auto-filled for ${matchedColumn.columnName}.`,
+    });
   };
 
   const revealResultsSection = () => {
@@ -327,16 +640,30 @@ export default function RuleBuilder() {
     setLoading(true);
 
     try {
-      const payload = buildPayload();
-      const response = await runValidation(payload, datasetRows);
+      const localPayload = buildPayload();
+      const response = await runAdHocRule(
+        {
+          dataset_id: selectedDataset?.id,
+          dataset_name: selectedDataset?.name,
+          rule_name: ruleName.trim() || 'Business validation rule',
+          sql: sqlText.trim() || generatedSqlPreview,
+          expected_result: {
+            type: 'zero_violations',
+          },
+        },
+        {
+          datasetRows,
+          localPayload,
+        },
+      );
 
-      setValidationResults(response);
+      setValidationResults(toValidationResultsShape(response, localPayload));
       revealResultsSection();
 
       pushToast({
         tone: 'success',
-        title: 'Validation completed successfully',
-        message: `${response.summary?.failedRows || 0} rows were flagged for review.`,
+        title: 'Rule executed',
+        message: `${response.resultRows ?? response.failedRows ?? 0} matching rows were saved in history.`,
       });
     } catch (error) {
       pushToast({
@@ -351,27 +678,192 @@ export default function RuleBuilder() {
     }
   };
 
-  const noFailedRowsInRun =
+  const handleSaveRule = async () => {
+    setSavingRule(true);
+
+    try {
+      const savedRule = await createSavedRule({
+        dataset_name: selectedDataset?.name,
+        rule_name: ruleName.trim() || 'Business validation rule',
+        sql: sqlText.trim() || generatedSqlPreview,
+        expected_result: {
+          type: 'zero_violations',
+        },
+      });
+
+      pushToast({
+        tone: 'success',
+        title: 'Rule saved',
+        message: `${savedRule.ruleName} is available in saved validation history.`,
+      });
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: 'Rule could not be saved',
+        message:
+          error.message ||
+          'The saved rule registry did not accept the current SQL payload.',
+      });
+    } finally {
+      setSavingRule(false);
+    }
+  };
+
+  const noRowsInRun =
     validationResults &&
-    (validationResults.summary?.failedRows || 0) === 0 &&
-    !deferredSearchTerm.trim();
+    (validationResults.summary?.resultRows ?? validationResults.summary?.failedRows ?? 0) === 0;
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr] xl:gap-6">
-      <section className="glass-panel p-4 sm:p-6">
-        <div className="border-b border-white/10 pb-6">
+    <div className="space-y-10">
+      <section className="glass-panel p-6 sm:p-8 lg:p-10">
+        <div className="border-b border-white/10 pb-8">
           <p className="section-kicker">Author Rule</p>
-          <h3 className="mt-3 text-2xl font-semibold text-white">
-            Configure a validation check
+          <h3 className="mt-4 text-3xl font-semibold text-white">
+            Ask a question from your dataset
           </h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">
-            Rule suggestions are now filtered by the selected column type so the
-            builder only presents checks that make sense for the active schema.
+          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
+            Enter a plain-English rule or write SQL directly. The app checks the
+            dataset and returns the rows that match what you asked for.
           </p>
         </div>
 
-        <div className="mt-6 space-y-6">
-          <div className="subtle-card">
+        <div className="mt-8 space-y-8">
+          <div className="subtle-card p-6 sm:p-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <label className="field-label mb-0" htmlFor="rule-natural-language">
+                  Rule Assistant
+                </label>
+                <p className="field-hint">
+                  Describe what you want to find in the dataset. The generated SQL remains editable.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateRule}
+                disabled={!nlInput.trim() || !schemaMetadata.length}
+                title="Generate a rule from the description and auto-fill the form below."
+                className="secondary-button w-full sm:w-auto"
+              >
+                Generate Rule
+              </button>
+            </div>
+
+            <textarea
+              id="rule-natural-language"
+              value={nlInput}
+              onChange={(event) => setNlInput(event.target.value)}
+              rows="4"
+              placeholder="Show students with attendance less than 70"
+              className="input-shell mt-4 min-h-[120px] resize-y"
+            />
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
+                Examples
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                age should be between 0 and 120
+                <br />
+                show employees with negative salary
+                <br />
+                email should not be null
+                <br />
+                salary greater than 10000
+              </p>
+            </div>
+          </div>
+
+          <div className="subtle-card p-6 sm:p-8">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="field-label mb-0">Authoring Mode</p>
+                <p className="field-hint">
+                  Use the assistant, guided fields, or direct SQL editing against the active dataset.
+                </p>
+              </div>
+              <div className="inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-1">
+                {[
+                  ['assistant', 'Assistant'],
+                  ['builder', 'Builder'],
+                  ['sql', 'SQL'],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setActiveAuthoringMode(mode)}
+                    className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition-all ${
+                      activeAuthoringMode === mode
+                        ? 'bg-cyan-400/15 text-cyan-100'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-6">
+              <div>
+                <label className="field-label" htmlFor="rule-name">
+                  Rule Name
+                </label>
+                <input
+                  id="rule-name"
+                  type="text"
+                  value={ruleName}
+                  onChange={(event) => setRuleName(event.target.value)}
+                  placeholder="Attendance below threshold"
+                  className="input-shell max-w-xl"
+                />
+                <p className="field-hint">
+                  This name appears in saved rules and history.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="field-label mb-0" htmlFor="rule-sql-editor">
+                    SQL Workspace
+                  </label>
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-sky-400">Live Editor</span>
+                </div>
+                <div id="rule-sql-editor" className="sql-editor-shell overflow-hidden p-0 border-slate-700">
+                  <Editor
+                    height="340px"
+                    defaultLanguage="sql"
+                    value={sqlText}
+                    theme="vs-dark"
+                    loading={<Loader label="Loading SQL editor" compact />}
+                    onChange={(value) => {
+                      setSqlText(value || '');
+                      setActiveAuthoringMode('sql');
+                    }}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 14,
+                      fontFamily:
+                        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                      lineNumbersMinChars: 3,
+                      padding: { top: 16, bottom: 16 },
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                      automaticLayout: true,
+                      contextmenu: true,
+                      renderLineHighlight: "all",
+                      minimap: { enabled: true, scale: 0.75 },
+                    }}
+                  />
+                </div>
+                <p className="field-hint">
+                  This SQL is sent to `/rules/run`, and the returned rows are saved in history.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="subtle-card p-6 sm:p-8">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <label className="field-label mb-0" htmlFor="rule-column">
                 Target Column
@@ -390,7 +882,7 @@ export default function RuleBuilder() {
                 setCompatibilityNotice('');
               }}
               className={`input-shell ${validationIssues.column ? 'input-shell-error' : ''}`}
-              title="Choose the column you want to validate."
+              title="Choose the column you want to use for this rule."
             >
               {!schemaMetadata.length && (
                 <option value="">No schema available yet</option>
@@ -407,13 +899,13 @@ export default function RuleBuilder() {
               <p className="field-hint">
                 {selectedColumnMeta
                   ? `Selected column ${selectedColumnMeta.columnName} is typed as ${selectedColumnMeta.dataType}.`
-                  : 'Pick a schema column to see the recommended rule set.'}
+                  : 'Pick a schema column to build the rule.'}
               </p>
             )}
           </div>
 
           {selectedColumnMeta && (
-            <div className="subtle-card">
+            <div className="subtle-card p-6 sm:p-8">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-white">
@@ -437,9 +929,36 @@ export default function RuleBuilder() {
 
           <div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="field-label mb-0">Semantic Mode</p>
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                SQL logic generation
+              </p>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setSemanticMode('query')}
+                className={`selection-card ${semanticMode === 'query' ? 'selection-card-active' : ''}`}
+              >
+                <p className="text-sm font-semibold text-white">Query Mode</p>
+                <p className="mt-1 text-xs text-slate-400">Match rows (BETWEEN min AND max)</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSemanticMode('validation')}
+                className={`selection-card ${semanticMode === 'validation' ? 'selection-card-active' : ''}`}
+              >
+                <p className="text-sm font-semibold text-white">Validation Mode</p>
+                <p className="mt-1 text-xs text-slate-400">Find violations (&lt; min OR &gt; max)</p>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="field-label mb-0">Rule Type</p>
               <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
-                Data-type aware recommendations
+                Simple options
               </p>
             </div>
             <div className="mt-3 space-y-3">
@@ -562,6 +1081,28 @@ export default function RuleBuilder() {
             </div>
           )}
 
+          {selectedRule === 'equals' && (
+            <div className="subtle-card">
+              <label className="field-label" htmlFor="rule-value">
+                Exact Match Value
+              </label>
+              <input
+                id="rule-value"
+                type="text"
+                value={params.value}
+                onChange={(event) =>
+                  setParams((current) => ({
+                    ...current,
+                    value: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Joy"
+                title="Exact string to match"
+                className="input-shell"
+              />
+            </div>
+          )}
+
           {selectedRule === 'regex' && (
             <div className="subtle-card">
               <label className="field-label" htmlFor="rule-pattern">
@@ -607,65 +1148,53 @@ export default function RuleBuilder() {
             </div>
           )}
 
-          <div className="subtle-card">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-              Payload Preview
-            </p>
-            <pre className="mt-4 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/75 p-4 text-xs leading-6 text-slate-300">
-{JSON.stringify(
-  (() => {
-    try {
-      return buildPayload();
-    } catch {
-      return {
-        column: selectedColumn,
-        rule: selectedRule,
-      };
-    }
-  })(),
-  null,
-  2,
-)}
-            </pre>
-          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+            <button
+              type="button"
+              onClick={handleRunValidation}
+              disabled={!canRunValidation}
+              title={
+                canRunValidation
+                  ? 'Run the selected rule and save the returned rows.'
+                  : primaryValidationMessage || 'Load a dataset to start validation.'
+              }
+              className="primary-button w-full disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader label="Executing rule" compact />
+              ) : (
+                'Run Rule'
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={handleRunValidation}
-            disabled={!canRunValidation}
-            title={
-              canRunValidation
-                ? 'Run the selected validation rule against the active dataset.'
-                : primaryValidationMessage || 'Load a dataset to start validation.'
-            }
-            className="primary-button w-full disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? (
-              <Loader label="Running validation" compact />
-            ) : (
-              'Run Validation'
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={handleSaveRule}
+              disabled={savingRule || !selectedDataset || !sqlText.trim()}
+              className="secondary-button w-full sm:w-auto"
+            >
+              {savingRule ? <Loader label="Saving" compact /> : 'Save Rule'}
+            </button>
+          </div>
         </div>
       </section>
 
       <section
         ref={resultsSectionRef}
         tabIndex={-1}
-        className={`glass-panel p-4 outline-none transition-all duration-500 sm:p-6 ${
+        className={`glass-panel p-6 outline-none transition-all duration-500 sm:p-8 lg:p-10 ${
           resultsHighlighted ? 'section-focus-flash' : ''
         }`}
       >
-        <div className="flex flex-col gap-4 border-b border-white/10 pb-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-5 border-b border-white/10 pb-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="section-kicker">Validation Results</p>
-            <h3 className="mt-3 text-2xl font-semibold text-white">
-              Failed rows and operational detail
+            <p className="section-kicker">Rule Results</p>
+            <h3 className="mt-4 text-3xl font-semibold text-white">
+              Rows returned by your rule
             </h3>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-              After each run, the builder scrolls you directly into the results
-              section so you can review failures, triage severity, and jump to the
-              observability dashboard without losing context.
+            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
+              The result table shows only the records that match the rule you entered,
+              without extra scoring or risk labels.
             </p>
           </div>
 
@@ -684,9 +1213,16 @@ export default function RuleBuilder() {
             <Link
               to="/dashboard"
               className="secondary-button w-full sm:w-auto"
-              title="Open the observability dashboard for aggregate signals."
+              title="Open the enterprise validation workspace."
             >
-              Open Dashboard
+              Open Workspace
+            </Link>
+            <Link
+              to="/history"
+              className="secondary-button w-full sm:w-auto"
+              title="Open persisted validation history."
+            >
+              View History
             </Link>
           </div>
         </div>
@@ -695,102 +1231,45 @@ export default function RuleBuilder() {
           <div className="mt-6 space-y-6">
             <div className="grid gap-4 md:grid-cols-3">
               <ResultSummaryCard
-                label="Checked Rows"
+                label="Dataset Rows"
                 value={validationResults.summary?.checkedRows || 0}
-                hint="Records evaluated in this run"
+                hint="Rows scanned for this rule"
               />
               <ResultSummaryCard
-                label="Passed Rows"
-                value={validationResults.summary?.passedRows || 0}
-                hint="Rows meeting rule expectations"
+                label="Result Rows"
+                value={
+                  validationResults.summary?.resultRows ??
+                  validationResults.summary?.failedRows ??
+                  0
+                }
+                hint="Rows returned by the rule"
               />
               <ResultSummaryCard
-                label="Failed Rows"
-                value={validationResults.summary?.failedRows || 0}
-                hint="Rows requiring review"
+                label="Rule"
+                value={validationResults.summary?.column || 'SQL'}
+                hint={validationResults.summary?.rule || 'Current rule'}
               />
             </div>
 
-            <div className="subtle-card">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="field-label mb-0">Search Failed Rows</p>
-                  <p className="field-hint">
-                    Filter by row id, column, value, or error message.
-                  </p>
-                </div>
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search failed rows"
-                  title="Search within the current failed-row result set."
-                  className="input-shell w-full sm:max-w-xs"
-                />
-              </div>
-            </div>
-
-            <div className="table-shell">
-              <div className="table-scroll max-h-[480px]">
-                <table className="data-table">
-                  <thead className="data-table-head">
-                    <tr>
-                      <th className="data-table-header-cell">Row ID</th>
-                      <th className="data-table-header-cell">Column</th>
-                      <th className="data-table-header-cell">Value</th>
-                      <th className="data-table-header-cell">Error Message</th>
-                      <th className="data-table-header-cell">Severity</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {filteredRows.map((row) => (
-                      <tr
-                        key={row.rowId}
-                        className="data-table-row-danger bg-rose-500/[0.03]"
-                      >
-                        <td className="data-table-cell font-semibold text-white">
-                          {row.rowId}
-                        </td>
-                        <td className="data-table-cell">{row.column}</td>
-                        <td className="data-table-cell text-rose-100">{row.value}</td>
-                        <td className="data-table-cell">{row.message}</td>
-                        <td className="data-table-cell">
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${
-                              severityClasses[row.severity] || severityClasses.medium
-                            }`}
-                          >
-                            {row.severity}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {!filteredRows.length && (
-              <div className="empty-state min-h-[180px]">
-                <p className="text-lg font-semibold text-white">
-                  {noFailedRowsInRun ? 'No failed rows detected' : 'No matching failed rows'}
-                </p>
-                <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-                  {noFailedRowsInRun
-                    ? 'This validation run completed successfully. Open the dashboard for the aggregate quality view or run another rule for a different column.'
-                    : 'Adjust the search term or rerun the rule to inspect a different slice of the failures.'}
-                </p>
-              </div>
-            )}
+            <ResultTable
+              rows={validationResults.resultRows || validationResults.failedRows || []}
+              title="Returned Rows"
+              description="Search, page, and inspect the rows returned by the backend SQL execution."
+              emptyTitle={noRowsInRun ? 'No rows matched this rule' : 'No returned rows'}
+              emptyMessage={
+                noRowsInRun
+                  ? 'The rule ran successfully, but the dataset did not contain matching rows.'
+                  : 'Run another rule to inspect a different slice of the dataset.'
+              }
+            />
           </div>
         ) : (
           <div className="empty-state mt-6">
             <p className="text-lg font-semibold text-white">
-              Validation results will appear here
+              Results will appear here
             </p>
             <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Load a dataset, select a compatible rule, and run validation to see
-              failed rows, error messages, and execution metrics.
+              Load a dataset, enter a rule, and run it to see the rows returned by your request.
             </p>
           </div>
         )}

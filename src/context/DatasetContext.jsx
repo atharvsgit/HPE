@@ -7,7 +7,6 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { appendProfileData } from '../services/localDataset';
 
 const DatasetContext = createContext(null);
 
@@ -105,20 +104,18 @@ export function DatasetProvider({ children }) {
 
   const appendDataset = useCallback(
     (nextData) => {
-      const appendedData = appendProfileData({
-        currentDataset: selectedDatasetState,
-        currentRows: datasetRowsState,
-        incomingData: nextData,
-      });
+      if (!nextData) return null;
 
-      if (!appendedData) {
-        return null;
-      }
+      const appendedData = {
+        dataset: { ...selectedDatasetState, ...nextData.dataset },
+        schema: nextData.schema?.length ? nextData.schema : schemaMetadataState,
+        rows: [...datasetRowsState, ...(nextData.rows || [])],
+      };
 
       replaceDataset(appendedData);
       return appendedData;
     },
-    [datasetRowsState, replaceDataset, selectedDatasetState],
+    [datasetRowsState, replaceDataset, schemaMetadataState, selectedDatasetState],
   );
 
   const dismissToast = useCallback((id) => {

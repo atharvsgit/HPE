@@ -2,34 +2,38 @@ import { Suspense, lazy } from 'react';
 import { NavLink, Outlet, Route, Routes } from 'react-router-dom';
 import Loader from './components/common/Loader';
 import StatusBadge from './components/common/StatusBadge';
-import ThemeToggle from './components/common/ThemeToggle';
 import Toast from './components/common/Toast';
 import { useDataset } from './context/DatasetContext';
-import dataOrbit from './assets/data-orbit.svg';
-import dataWave from './assets/data-wave.svg';
 
 const IngestionPage = lazy(() => import('./pages/IngestionPage'));
 const RulePage = lazy(() => import('./pages/RulePage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const ValidationHistoryPage = lazy(() => import('./pages/ValidationHistoryPage'));
 
 const navigation = [
   {
     path: '/',
-    label: 'Dataset Intake',
-    description: 'Connect files, databases, APIs, and cloud warehouses.',
+    label: 'Dataset Workspace',
+    description: 'Register enterprise datasets, SQL sources, APIs, and warehouses.',
     eyebrow: 'Connect',
   },
   {
     path: '/rules',
-    label: 'Rule Builder',
-    description: 'Author targeted quality checks and inspect failures.',
+    label: 'Rule Workspace',
+    description: 'Author business rules with assistant, builder, or SQL mode.',
     eyebrow: 'Validate',
   },
   {
     path: '/dashboard',
-    label: 'Observability',
-    description: 'Track health, anomalies, drift, and error volume.',
-    eyebrow: 'Observe',
+    label: 'Command Center',
+    description: 'Review rule execution activity and business validation status.',
+    eyebrow: 'Operate',
+  },
+  {
+    path: '/history',
+    label: 'Validation History',
+    description: 'Revisit saved rules, executions, SQL, and returned rows.',
+    eyebrow: 'Audit',
   },
 ];
 
@@ -39,27 +43,21 @@ const formatCompactNumber = (value) =>
     maximumFractionDigits: 1,
   }).format(value || 0);
 
-const getWorkspaceStatus = ({ selectedDataset, validationResults, failedRows }) => {
+const getWorkspaceStatus = ({ selectedDataset, validationResults, resultRows }) => {
   if (!selectedDataset) {
     return {
       label: 'No Dataset',
       tone: 'pending',
-      helper: 'Connect a source to unlock validation and observability.',
+      helper: 'Connect a source to unlock validation and history.',
     };
   }
 
   if (validationResults) {
-    return failedRows > 0
-      ? {
-          label: 'Validation Completed',
-          tone: 'error',
-          helper: `${failedRows} rows still need attention in the latest run.`,
-        }
-      : {
-          label: 'Validation Completed',
-          tone: 'success',
-          helper: 'The latest run finished without any failed rows.',
-        };
+    return {
+      label: 'Rule Completed',
+      tone: 'success',
+      helper: `${resultRows} rows were returned in the latest run.`,
+    };
   }
 
   return {
@@ -89,7 +87,8 @@ function AppShell() {
     dismissToast,
   } = useDataset();
 
-  const failedRows =
+  const resultRows =
+    validationResults?.summary?.resultRows ??
     validationResults?.summary?.failedRows ??
     validationResults?.failedRows?.length ??
     0;
@@ -97,30 +96,86 @@ function AppShell() {
   const workspaceStatus = getWorkspaceStatus({
     selectedDataset,
     validationResults,
-    failedRows,
+    resultRows,
   });
 
   return (
-    <div className="relative min-h-screen overflow-hidden app-shell-surface">
-      <div className="pointer-events-none absolute inset-0">
-        <img
-          src={dataWave}
-          alt=""
-          className="scene-image absolute left-0 top-0 h-full w-full object-cover opacity-40"
-        />
-        <img
-          src={dataOrbit}
-          alt=""
-          className="scene-image scene-image-orbit absolute right-[-6rem] top-[-8rem] h-[34rem] w-[34rem] opacity-35"
-        />
-        <div className="absolute left-[-8rem] top-10 h-72 w-72 rounded-full bg-cyan-500/20 blur-3xl" />
-        <div className="absolute right-[-7rem] top-24 h-64 w-64 rounded-full bg-rose-500/10 blur-3xl" />
-        <div className="absolute bottom-0 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="grid-overlay absolute inset-0 opacity-55" />
-      </div>
+    <div className="relative min-h-screen overflow-hidden app-shell-surface bg-slate-950">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1800px] flex-col gap-6 px-4 py-4 sm:py-6 lg:flex-row lg:px-8">
+        <aside className="glass-panel hidden h-[calc(100vh-3rem)] w-64 shrink-0 flex-col overflow-hidden p-5 lg:sticky lg:top-6 lg:flex">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="section-kicker">Validation</p>
+              <h1 className="mt-2 text-xl font-semibold text-white">DVC Workspace</h1>
+            </div>
+            <div className="brand-badge flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold text-cyan-100">
+              DVC
+            </div>
+          </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:py-6 lg:flex-row lg:px-6">
-        <aside className="glass-panel hidden w-full max-w-sm flex-col justify-between overflow-hidden p-5 lg:flex xl:max-w-md xl:p-6">
+          <div className="mt-6 space-y-2">
+            {navigation.map((item) =>
+              item.path === '/rules' && isRuleBuilderLocked ? (
+                <div
+                  key={item.path}
+                  className="nav-link nav-link-disabled"
+                  title="Connect a dataset to start rule execution."
+                  aria-disabled="true"
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-inherit">
+                      {item.label}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Connect a dataset first.
+                    </span>
+                  </span>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Locked
+                  </span>
+                </div>
+              ) : (
+                <NavLink
+                  key={item.path}
+                  end={item.path === '/'}
+                  to={item.path}
+                  className={({ isActive }) =>
+                    `nav-link ${isActive ? 'nav-link-active' : ''}`
+                  }
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-inherit">
+                      {item.label}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-400">
+                      {item.description}
+                    </span>
+                  </span>
+                </NavLink>
+              ),
+            )}
+          </div>
+
+          <div className="mt-auto space-y-4">
+            <div className="subtle-card">
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                Active Dataset
+              </p>
+              <div className="mt-3">
+                <StatusBadge tone={workspaceStatus.tone}>
+                  {workspaceStatus.label}
+                </StatusBadge>
+              </div>
+              <p className="mt-3 text-sm font-semibold text-white">
+                {selectedDataset?.name || 'No dataset connected'}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {workspaceStatus.helper}
+              </p>
+            </div>
+          </div>
+        </aside>
+        <aside className="hidden">
           <div>
             <div className="flex items-center justify-between">
               <div>
@@ -136,11 +191,12 @@ function AppShell() {
 
             <p className="mt-4 text-sm leading-6 text-slate-400">
               A richer control plane for onboarding data, building rules, and
-              visualizing validity signals with live or locally-derived metrics.
+                  executing business rules, and preserving validation evidence for
+                  analysts, operations, and compliance teams.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-2">
-              {['Schema-aware', 'Locally profiled CSVs', '3D glass UI'].map((chip) => (
+              {['Schema-aware', 'Persistent history', 'SQL execution'].map((chip) => (
                 <span
                   key={chip}
                   className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300"
@@ -204,8 +260,6 @@ function AppShell() {
           </div>
 
           <div className="space-y-4">
-            <ThemeToggle />
-
             <div className="subtle-card">
               <p className="section-kicker">Active Dataset</p>
               <div className="mt-3">
@@ -219,7 +273,7 @@ function AppShell() {
               <p className="mt-2 text-sm text-slate-400">
                 {selectedDataset
                   ? `${selectedDataset.sourceType} source via ${selectedDataset.subType}`
-                  : 'Connect a source to unlock schema-aware validation and live observability.'}
+                  : 'Connect a source to unlock schema-aware validation and execution history.'}
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-400">
                 {workspaceStatus.helper}
@@ -238,27 +292,25 @@ function AppShell() {
                 hint="Rows represented in the current source"
               />
               <MetricTile
-                label="Failed Rows"
-                value={formatCompactNumber(failedRows)}
-                hint="Most recent validation run"
+                label="Result Rows"
+                value={formatCompactNumber(resultRows)}
+                hint="Rows returned by latest rule"
               />
             </div>
           </div>
         </aside>
 
         <div className="flex-1">
-          <header className="glass-panel p-4 sm:p-5 lg:p-6">
+          <header className="glass-panel p-6 sm:p-8 lg:p-10">
             <div className="flex flex-col gap-5 lg:gap-6 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <p className="section-kicker">Data Quality Workspace</p>
                 <h2 className="mt-3 text-3xl font-semibold text-white">
-                  Validate data with a control room that feels alive
+                  Enterprise Validation Workspace
                 </h2>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-                  Move from ingestion to validation to observability without
-                  leaving the control plane. When the backend is unavailable, the
-                  dashboard now derives its signals from your connected schema and
-                  rule outputs instead of inventing numbers.
+                  Move from dataset onboarding to rule entry, SQL execution, saved
+                  rules, and history in one clear sequence.
                 </p>
 
                 <div className="mt-5 flex flex-wrap gap-2.5 sm:gap-3">
@@ -266,22 +318,18 @@ function AppShell() {
                     {workspaceStatus.label}
                   </StatusBadge>
                   <span className="status-chip">
-                    Live source awareness
+                    Dataset governance
                   </span>
                   <span className="status-chip">
-                    Derived observability
+                    Saved executions
                   </span>
                   <span className="status-chip">
-                    Theme toggle
+                    Backend-ready APIs
                   </span>
                 </div>
               </div>
 
               <div className="flex flex-col gap-4 xl:max-w-[36rem]">
-                <div className="flex justify-end xl:hidden">
-                  <ThemeToggle />
-                </div>
-
                 <div className="hero-visual">
                   <div className="hero-visual-copy">
                     <p className="text-xs uppercase tracking-[0.24em] text-cyan-300/70">
@@ -293,7 +341,7 @@ function AppShell() {
                     <p className="mt-2 text-sm leading-6 text-slate-400">
                       {selectedDataset
                         ? `Tracking ${selectedDataset.records || 0} rows across ${schemaMetadata.length} columns.`
-                        : 'Connect a source to light up schema metrics, validation outputs, and observability charts.'}
+                      : 'Connect a source to populate schema metadata, business rules, and validation history.'}
                     </p>
                   </div>
 
@@ -309,16 +357,16 @@ function AppShell() {
                       hint="Profiled columns"
                     />
                     <MetricTile
-                      label="Alerts"
-                      value={failedRows}
-                      hint="Open validation failures"
+                      label="Results"
+                      value={resultRows}
+                      hint="Rows returned by latest rule"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 flex gap-3 overflow-x-auto pb-1 lg:hidden">
+            <div className="mt-8 flex gap-3 overflow-x-auto pb-1 lg:hidden">
               {navigation.map((item) => (
                 item.path === '/rules' && isRuleBuilderLocked ? (
                   <span
@@ -372,6 +420,7 @@ export default function App() {
         <Route path="/" element={<IngestionPage />} />
         <Route path="/rules" element={<RulePage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/history" element={<ValidationHistoryPage />} />
       </Route>
     </Routes>
   );

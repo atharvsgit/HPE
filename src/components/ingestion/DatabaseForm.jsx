@@ -1,4 +1,5 @@
 const databaseTypes = [
+  { id: 'parquet', label: 'Parquet' },
   { id: 'postgresql', label: 'PostgreSQL' },
   { id: 'mysql', label: 'MySQL' },
   { id: 'mongodb', label: 'MongoDB' },
@@ -13,7 +14,7 @@ export default function DatabaseForm({ value, onChange, disabled }) {
     <div className="space-y-4">
       <div>
         <p className="field-label">Database Type</p>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-4">
           {databaseTypes.map((databaseType) => {
             const isActive = value.subType === databaseType.id;
 
@@ -79,6 +80,37 @@ export default function DatabaseForm({ value, onChange, disabled }) {
               placeholder="orders"
               className="input-shell"
             />
+          </div>
+        </div>
+      ) : value.subType === 'parquet' ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="subtle-card">
+            <label className="field-label">Dataset File</label>
+            <label className="dropzone-shell">
+              <input
+                type="file"
+                accept=".parquet"
+                onChange={(e) => updateField('file', e.target.files?.[0] || null)}
+                disabled={disabled}
+                className="hidden"
+              />
+              <span className="dropzone-badge">Upload File</span>
+              <span className="mt-4 text-base font-semibold text-white">
+                {value.file ? value.file.name : 'Drop or browse for a .parquet file'}
+              </span>
+              <span className="mt-2 text-sm leading-6 text-slate-400">
+                Accepts Parquet files. Uploads are submitted as multipart FormData.
+              </span>
+            </label>
+          </div>
+          <div className="subtle-card">
+            <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-inner shadow-black/10">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">File Readiness</p>
+              <p className="mt-2 text-sm font-semibold text-white">
+                {value.file ? 'Ready for upload' : 'Awaiting file selection'}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">Selected format: PARQUET</p>
+            </div>
           </div>
         </div>
       ) : (

@@ -1,83 +1,117 @@
-import { useEffect, useState } from 'react';
-import AnomalyChart from '../components/dashboard/AnomalyChart';
-import DriftChart from '../components/dashboard/DriftChart';
-import FailureTable from '../components/dashboard/FailureTable';
-import HealthChart from '../components/dashboard/HealthChart';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import Loader from '../components/common/Loader';
+import ResultTable from '../components/common/ResultTable';
 import Skeleton from '../components/common/Skeleton';
+import StatusBadge from '../components/common/StatusBadge';
 import { useDataset } from '../context/DatasetContext';
-import { deriveObservabilityData } from '../services/derivedMetrics';
-import { getQualityScore, getReport } from '../services/endpoints';
+import {
+  getRuleResults,
+  getSavedRules,
+  getSchedulerRules,
+} from '../services/rulesApi';
 
-function SummaryCard({ label, value, hint }) {
+const formatDateTime = (value) => {
+  if (!value) {
+    return 'No executions yet';
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+};
+
+function WorkspaceMetric({ label, value, hint, tone = 'neutral' }) {
+  const toneClass =
+    tone === 'danger'
+      ? 'border-rose-400/25'
+      : tone === 'success'
+        ? 'border-emerald-400/25'
+        : 'border-white/10';
+
   return (
-    <div className="metric-card">
+    <div className={`metric-card min-h-[168px] ${toneClass}`}>
       <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-bold text-white">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{hint}</p>
+      <p className="mt-4 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-400">{hint}</p>
+    </div>
+  );
+}
+
+function ExecutionFeed({ executions }) {
+  if (!executions.length) {
+    return (
+      <div className="empty-state">
+        <p className="text-lg font-semibold text-white">No rule executions yet</p>
+        <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
+          Run a business rule from the Rule Workspace to start building permanent
+          validation intelligence for this dataset.
+        </p>
+        <Link to="/rules" className="primary-button mt-6">
+          Open Rule Workspace
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative border-l border-slate-800 ml-3 md:ml-4 space-y-6">
+      {executions.slice(0, 8).map((execution) => (
+        <div key={execution.id} className="relative pl-6 md:pl-8 group">
+          <div className={`absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-[#111827] ${execution.status === 'completed' || execution.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-white">{execution.ruleName}</h3>
+                <span className="text-xs text-slate-500">{formatDateTime(execution.executionTime)}</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400 font-mono truncate">{execution.sql || 'No SQL recorded'}</p>
+              <div className="mt-3 flex items-center gap-4 text-xs font-medium text-slate-300">
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Dataset:</span> {execution.datasetName}</span>
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Returned:</span> {execution.resultRows ?? execution.failedRows ?? 0}</span>
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Scanned:</span> {execution.checkedRows}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Link to="/history" className="rounded-md border border-slate-700 bg-slate-800/50 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-colors">
+                View History
+              </Link>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const {
-    selectedDataset,
-    schemaMetadata,
-    validationResults,
-    datasetRows,
-    pushToast,
-  } = useDataset();
+  const { selectedDataset, schemaMetadata, validationResults, datasetRows } = useDataset();
   const [loading, setLoading] = useState(true);
-  const [report, setReport] = useState(null);
-  const [qualityScore, setQualityScore] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [savedRules, setSavedRules] = useState([]);
+  const [schedulerRules, setSchedulerRules] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
-    const derivedTelemetry = deriveObservabilityData({
-      selectedDataset,
-      schemaMetadata,
-      validationResults,
-      datasetRows,
-    });
 
-    const loadDashboard = async () => {
-      if (!selectedDataset) {
-        setReport(null);
-        setQualityScore(null);
-        setLoading(false);
-        return;
-      }
-
+    const loadWorkspace = async () => {
       setLoading(true);
 
       try {
-        const [reportResponse, qualityResponse] = await Promise.all([
-          getReport(selectedDataset?.id),
-          getQualityScore(selectedDataset?.id),
+        const [rules, scheduler, globalHistory] = await Promise.all([
+          getSavedRules(),
+          getSchedulerRules(),
+          getRuleResults('all'),
         ]);
 
         if (!isMounted) {
           return;
         }
 
-        setReport(reportResponse || derivedTelemetry?.report || null);
-        setQualityScore(qualityResponse || derivedTelemetry?.qualityScore || null);
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        if (derivedTelemetry) {
-          setReport(derivedTelemetry.report);
-          setQualityScore(derivedTelemetry.qualityScore);
-        } else {
-          pushToast({
-            tone: 'error',
-            title: 'Dashboard refresh failed',
-            message:
-              error.message ||
-              'The dashboard could not load because no usable dataset telemetry is available yet.',
-          });
-        }
+        setSavedRules(rules);
+        setSchedulerRules(scheduler);
+        setHistory(globalHistory);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -85,125 +119,168 @@ export default function DashboardPage() {
       }
     };
 
-    loadDashboard();
+    loadWorkspace();
 
     return () => {
       isMounted = false;
     };
-  }, [
-    datasetRows,
-    pushToast,
-    schemaMetadata,
-    selectedDataset,
-    selectedDataset?.id,
-    validationResults,
-  ]);
+  }, [validationResults]);
+
+  const workspaceSummary = useMemo(() => {
+    const totalResults = history.reduce(
+      (total, entry) => total + Number(entry.resultRows ?? entry.failedRows ?? 0),
+      0,
+    );
+    const latestExecution = history[0];
+
+    return {
+      totalResults,
+      latestExecution,
+      activeRows: datasetRows.length || selectedDataset?.records || 0,
+    };
+  }, [datasetRows.length, history, selectedDataset?.records]);
 
   return (
-    <div className="space-y-6">
-      <section className="glass-panel animate-slide-up p-4 sm:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-10">
+      <section className="glass-panel animate-slide-up p-6 sm:p-10 lg:p-14">
+        <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="section-kicker">Observability Dashboard</p>
-            <h3 className="mt-3 text-2xl font-semibold text-white">
-              Monitor health, anomalies, drift, and failure trends
-            </h3>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-              This view combines aggregate scoring with row-level failure signals
-              so teams can quickly understand whether a dataset is within
-              tolerance before it reaches consuming systems.
+            <p className="section-kicker">Enterprise Validation Workspace</p>
+            <h2 className="mt-4 max-w-4xl text-4xl font-semibold text-white">
+              Business rule operations for governed datasets
+            </h2>
+            <p className="mt-5 max-w-4xl text-base leading-7 text-slate-400">
+              A simple workspace for daily use: connect a dataset, run the rules
+              you care about, and revisit the rows returned by each run.
             </p>
           </div>
 
-          <div className="subtle-card w-full max-w-sm">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-              Observed Asset
-            </p>
-            <p className="mt-2 text-sm font-semibold text-white">
-              {selectedDataset?.name || 'Awaiting a connected dataset'}
-            </p>
-            <p className="mt-2 text-sm text-slate-400">
-              {selectedDataset
-                ? 'Metrics come from the connected profile or live backend responses.'
-                : 'No values are shown until the interface has connected data to derive from.'}
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[32rem]">
+            <Link to="/" className="secondary-button">
+              Dataset Workspace
+            </Link>
+            <Link to="/rules" className="primary-button">
+              Execute Rule
+            </Link>
           </div>
         </div>
       </section>
 
       {loading ? (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-12 xl:gap-6">
+        <div className="grid gap-5 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="glass-panel p-4 sm:p-6">
+              <Skeleton className="h-40 w-full" />
+            </div>
+          ))}
           <div className="glass-panel p-4 sm:p-6 xl:col-span-4">
-            <Skeleton className="h-64 w-full" />
-          </div>
-          <div className="glass-panel p-4 sm:p-6 xl:col-span-8">
-            <Skeleton className="h-64 w-full" />
-          </div>
-          <div className="glass-panel p-4 sm:p-6 xl:col-span-6">
-            <Skeleton className="h-72 w-full" />
-          </div>
-          <div className="glass-panel p-4 sm:p-6 xl:col-span-6">
-            <Skeleton className="h-72 w-full" />
+            <Loader label="Loading validation workspace" />
           </div>
         </div>
-      ) : qualityScore && report ? (
+      ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <SummaryCard
-              label="Quality Score"
-              value={`${qualityScore.score}%`}
-              hint={`${qualityScore.status} and ${qualityScore.trendLabel.toLowerCase()}`}
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <WorkspaceMetric
+              label="Active Dataset"
+              value={selectedDataset ? 'Ready' : 'Pending'}
+              hint={selectedDataset?.name || 'Connect an enterprise dataset to begin.'}
+              tone={selectedDataset ? 'success' : 'neutral'}
             />
-            <SummaryCard
-              label="Passed Checks"
-              value={qualityScore.passed}
-              hint="Records or rules meeting expectations"
+            <WorkspaceMetric
+              label="Schema Fields"
+              value={schemaMetadata.length}
+              hint={`${workspaceSummary.activeRows} rows available for validation.`}
             />
-            <SummaryCard
-              label="Failed Checks"
-              value={qualityScore.failed}
-              hint="Rows flagged for remediation"
+            <WorkspaceMetric
+              label="Saved Rules"
+              value={savedRules.length}
+              hint={`${schedulerRules.length} scheduler classifications available from backend.`}
             />
-            <SummaryCard
-              label="Completeness"
-              value={`${qualityScore.completeness}%`}
-              hint="Non-empty cell coverage across the dataset"
-            />
-            <SummaryCard
-              label="Latency"
-              value={report.summary?.pipelineLatency || '2m 18s'}
-              hint="Current pipeline evaluation time"
+            <WorkspaceMetric
+              label="Rows Returned"
+              value={workspaceSummary.totalResults}
+              hint="Total rows returned across saved executions."
+              tone={workspaceSummary.totalResults ? 'success' : 'neutral'}
             />
           </section>
 
-          <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-12 xl:gap-6">
-            <div className="glass-panel p-4 sm:p-6 xl:col-span-4">
-              <HealthChart qualityScore={qualityScore} />
+          <section className="space-y-8">
+            <div className="glass-panel p-6 sm:p-8 lg:p-10">
+              <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="section-kicker">Recent Validations</p>
+                  <h3 className="mt-3 text-2xl font-semibold text-white">
+                    Execution feed
+                  </h3>
+                </div>
+                <Link to="/history" className="secondary-button">
+                  Open Full History
+                </Link>
+              </div>
+
+              <div className="mt-6">
+                <ExecutionFeed executions={history} />
+              </div>
             </div>
-            <div className="glass-panel p-4 sm:p-6 xl:col-span-8">
-              <AnomalyChart anomalies={report.anomalies} />
+
+            <div className="glass-panel p-6 sm:p-8 lg:p-10">
+              <ResultTable
+                rows={workspaceSummary.latestExecution?.rows || []}
+                title="Latest Returned Rows"
+                description="The newest execution result is shown as a real data table with search and pagination."
+                emptyTitle="No returned rows yet"
+                emptyMessage="Run a rule from the Rule Workspace to populate this table from backend execution results."
+              />
             </div>
-            <div className="glass-panel p-4 sm:p-6 xl:col-span-6">
-              <DriftChart drift={report.drift} />
+
+            <div className="glass-panel p-6 sm:p-8 lg:p-10">
+                <p className="section-kicker">Dataset Activity</p>
+                <h3 className="mt-3 text-2xl font-semibold text-white">
+                  Source summary
+                </h3>
+                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    ['Dataset', selectedDataset?.name || 'Not connected'],
+                    ['Source Type', selectedDataset?.sourceType || 'Pending'],
+                    ['Connector', selectedDataset?.subType || 'Pending'],
+                    ['Last Execution', formatDateTime(workspaceSummary.latestExecution?.executionTime)],
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+                    >
+                      <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-white">{value}</p>
+                    </div>
+                  ))}
+                </div>
             </div>
-            <div className="glass-panel p-4 sm:p-6 xl:col-span-6">
-              <FailureTable failures={report.failures} />
-            </div>
+
+              <div className="glass-panel p-6 sm:p-8 lg:p-10">
+                <p className="section-kicker">Validation Lifecycle</p>
+                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    ['Connect source', Boolean(selectedDataset)],
+                    ['Load schema', schemaMetadata.length > 0],
+                    ['Save rules', savedRules.length > 0],
+                    ['Persist results', history.length > 0],
+                  ].map(([label, done]) => (
+                    <div
+                      key={label}
+                      className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+                    >
+                      <span className="text-sm font-medium text-slate-200">{label}</span>
+                      <StatusBadge tone={done ? 'success' : 'pending'}>
+                        {done ? 'Done' : 'Pending'}
+                      </StatusBadge>
+                    </div>
+                  ))}
+                </div>
+              </div>
           </section>
         </>
-      ) : (
-        <section className="glass-panel p-4 sm:p-6">
-          <div className="empty-state">
-            <p className="text-lg font-semibold text-white">
-              No dashboard telemetry available
-            </p>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
-              Connect a dataset and run validation to populate the observability
-              views. The dashboard now stays empty until there is real connected
-              schema or validation data to derive from.
-            </p>
-          </div>
-        </section>
       )}
     </div>
   );

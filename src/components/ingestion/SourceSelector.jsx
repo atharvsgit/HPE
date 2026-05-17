@@ -1,22 +1,17 @@
 const sourceOptions = [
   {
-    id: 'file',
-    label: 'File',
-    description: 'CSV or Parquet upload',
-  },
-  {
     id: 'database',
-    label: 'Database',
-    description: 'PostgreSQL, MySQL, MongoDB',
+    label: 'SQL and Dataset',
+    description: 'PostgreSQL, MySQL, MongoDB, Parquet',
   },
   {
     id: 'api',
-    label: 'API',
-    description: 'REST endpoint ingestion',
+    label: 'API Source',
+    description: 'REST endpoint contract',
   },
   {
     id: 'cloud',
-    label: 'Cloud',
+    label: 'Cloud Warehouse',
     description: 'Snowflake or BigQuery',
   },
 ];

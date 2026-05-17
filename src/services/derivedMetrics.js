@@ -1,4 +1,10 @@
-import { isEmptyValue } from './localDataset';
+const isEmptyValue = (value) =>
+  value === null ||
+  value === undefined ||
+  String(value).trim() === '' ||
+  Number.isNaN(value) ||
+  value === 'NaN' ||
+  value === 'null';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 

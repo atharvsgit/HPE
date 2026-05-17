@@ -49,12 +49,12 @@ const initialCloudState = {
 };
 
 const sourceDescriptions = {
-  file: 'Upload CSV or Parquet files with schema introspection and profiling.',
+  file: 'Register an enterprise dataset, including CSV-backed sources for local demos.',
   database:
-    'Connect operational and analytical stores such as PostgreSQL, MySQL, and MongoDB.',
-  api: 'Register a REST endpoint with method and headers for direct ingestion.',
+    'Connect SQL-backed operational and analytical stores such as PostgreSQL, MySQL, and MongoDB.',
+  api: 'Register a business API source with method and headers for direct validation.',
   cloud:
-    'Attach enterprise warehouses like Snowflake and BigQuery for governed observability.',
+    'Attach enterprise warehouses like Snowflake and BigQuery for governed validation.',
 };
 
 const isBlank = (value) => String(value ?? '').trim() === '';
@@ -72,7 +72,7 @@ export default function IngestionPage() {
     pushToast,
   } = useDataset();
 
-  const [sourceType, setSourceType] = useState('file');
+  const [sourceType, setSourceType] = useState('database');
   const [fileState, setFileState] = useState({ file: null, format: 'csv' });
   const [databaseState, setDatabaseState] = useState(initialDatabaseState);
   const [apiState, setApiState] = useState(initialApiState);
@@ -91,13 +91,8 @@ export default function IngestionPage() {
   const currentColumnCount = schemaMetadata.length || 0;
   const datasetStatus = validationResults
     ? {
-        label: 'Validation Completed',
-        tone:
-          (validationResults.summary?.failedRows ||
-            validationResults.failedRows?.length ||
-            0) > 0
-            ? 'error'
-            : 'success',
+        label: 'Rule Completed',
+        tone: 'success',
       }
     : selectedDataset
       ? {
@@ -207,6 +202,13 @@ export default function IngestionPage() {
     }
 
     if (sourceType === 'database') {
+      if (databaseState.subType === 'parquet') {
+        if (!databaseState.file) {
+          return 'Select a Parquet file before submitting.';
+        }
+        return '';
+      }
+
       if (databaseState.subType === 'mongodb') {
         if (isBlank(databaseState.uri)) {
           return 'Enter the MongoDB URI before submitting.';
@@ -290,15 +292,19 @@ export default function IngestionPage() {
 
       let response;
 
-      if (sourceType === 'file') {
-        if (!fileState.file) {
-          throw new Error('Select a CSV or Parquet file before submitting.');
+      if (sourceType === 'file' || (sourceType === 'database' && databaseState.subType === 'parquet')) {
+        const isParquetDb = sourceType === 'database' && databaseState.subType === 'parquet';
+        const fileToUpload = isParquetDb ? databaseState.file : fileState.file;
+        const formatToUse = isParquetDb ? 'parquet' : fileState.format;
+
+        if (!fileToUpload) {
+          throw new Error(`Select a ${formatToUse.toUpperCase()} file before submitting.`);
         }
 
         const formData = new FormData();
         formData.append('source_type', 'file');
-        formData.append('sub_type', fileState.format);
-        formData.append('file', fileState.file);
+        formData.append('sub_type', formatToUse);
+        formData.append('file', fileToUpload);
 
         response = await uploadDataset(formData);
       } else {
@@ -424,12 +430,12 @@ export default function IngestionPage() {
             <div>
               <p className="section-kicker">Dataset Management</p>
               <h3 className="mt-3 text-2xl font-semibold text-white">
-                Register a source and capture its schema metadata
+                Register a governed source and capture its schema metadata
               </h3>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                Select the source type, complete the connector details, and submit
-                a structured payload to the backend. Uploads automatically use
-                `FormData`; connected schemas are persisted in shared context.
+                Select an enterprise dataset, SQL source, API source, or cloud
+                warehouse. CSV upload remains available for demos, but the core
+                workflow is source registration and reusable validation.
               </p>
             </div>
 
@@ -559,7 +565,7 @@ export default function IngestionPage() {
                 <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
                   {selectedDataset
                     ? 'Manage the active dataset lifecycle here. You can reset the current context, replace it with a new source, or append new row-backed file data.'
-                    : 'Connect a dataset to populate schema metadata, validation controls, and the observability dashboard.'}
+                    : 'Connect a dataset to populate schema metadata, validation controls, and execution history.'}
                 </p>
               </div>
 
@@ -622,7 +628,7 @@ export default function IngestionPage() {
                 </h3>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
                   The backend response is normalized into shared context so rule
-                  authoring and observability use the same schema metadata.
+                  authoring and validation history use the same schema metadata.
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-left lg:text-right">
@@ -647,20 +653,19 @@ export default function IngestionPage() {
                 <p className="text-sm font-semibold text-white">1. Connect</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
                   Submit a structured connector payload for files, databases, APIs,
-                  or cloud warehouses.
+                or cloud warehouses.
                 </p>
               </div>
               <div className="subtle-card">
                 <p className="text-sm font-semibold text-white">2. Validate</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Build column-level rules and inspect red-highlighted failed rows.
+                Build business rules with assistant, SQL, or guided schema logic.
                 </p>
               </div>
               <div className="subtle-card">
                 <p className="text-sm font-semibold text-white">3. Observe</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Monitor pass rates, anomalies, drift, and operational failures in
-                  a single dashboard.
+                Revisit saved rules, execution timelines, SQL, and returned rows.
                 </p>
               </div>
             </div>
