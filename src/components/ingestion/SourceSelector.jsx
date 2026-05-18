@@ -1,8 +1,8 @@
 const sourceOptions = [
   {
     id: 'database',
-    label: 'SQL and Dataset',
-    description: 'PostgreSQL, MySQL, MongoDB, Parquet',
+    label: 'Database Source',
+    description: 'PostgreSQL, MySQL, or MongoDB',
   },
   {
     id: 'api',
@@ -20,7 +20,7 @@ export default function SourceSelector({ sourceType, onChange, disabled }) {
   return (
     <div>
       <p className="field-label">Source Type</p>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-3">
         {sourceOptions.map((option) => {
           const isActive = sourceType === option.id;
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import ConfirmationModal from '../components/common/ConfirmationModal';
 import StatusBadge from '../components/common/StatusBadge';
 import { Link, useNavigate } from 'react-router-dom';
@@ -6,14 +6,12 @@ import Loader from '../components/common/Loader';
 import ApiForm from '../components/ingestion/ApiForm';
 import CloudForm from '../components/ingestion/CloudForm';
 import DatabaseForm from '../components/ingestion/DatabaseForm';
-import FileUpload from '../components/ingestion/FileUpload';
 import SchemaTable from '../components/ingestion/SchemaTable';
 import SourceSelector from '../components/ingestion/SourceSelector';
 import { useDataset } from '../context/DatasetContext';
 import {
   buildHeadersObject,
   connectDatabase,
-  uploadDataset,
 } from '../services/endpoints';
 
 const initialDatabaseState = {
@@ -49,7 +47,6 @@ const initialCloudState = {
 };
 
 const sourceDescriptions = {
-  file: 'Register an enterprise dataset, including CSV-backed sources for local demos.',
   database:
     'Connect SQL-backed operational and analytical stores such as PostgreSQL, MySQL, and MongoDB.',
   api: 'Register a business API source with method and headers for direct validation.',
@@ -62,8 +59,6 @@ const isBlank = (value) => String(value ?? '').trim() === '';
 export default function IngestionPage() {
   const navigate = useNavigate();
   const {
-    appendDataset,
-    datasetRows,
     replaceDataset,
     resetDataset,
     selectedDataset,
@@ -73,11 +68,9 @@ export default function IngestionPage() {
   } = useDataset();
 
   const [sourceType, setSourceType] = useState('database');
-  const [fileState, setFileState] = useState({ file: null, format: 'csv' });
   const [databaseState, setDatabaseState] = useState(initialDatabaseState);
   const [apiState, setApiState] = useState(initialApiState);
   const [cloudState, setCloudState] = useState(initialCloudState);
-  const [appendToExisting, setAppendToExisting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [confirmationState, setConfirmationState] = useState({
@@ -86,8 +79,7 @@ export default function IngestionPage() {
 
   const sourceSummary = useMemo(() => sourceDescriptions[sourceType], [sourceType]);
   const hasExistingDataset = Boolean(selectedDataset);
-  const canAppend = sourceType === 'file' && hasExistingDataset && datasetRows.length > 0;
-  const currentRowCount = datasetRows.length || selectedDataset?.records || 0;
+  const currentRowCount = selectedDataset?.records || 0;
   const currentColumnCount = schemaMetadata.length || 0;
   const datasetStatus = validationResults
     ? {
@@ -104,16 +96,8 @@ export default function IngestionPage() {
           tone: 'pending',
         };
   const submitButtonLabel = hasExistingDataset
-    ? appendToExisting && canAppend
-      ? 'Append Dataset'
-      : 'Replace Dataset'
+    ? 'Replace Dataset'
     : 'Connect Dataset';
-
-  useEffect(() => {
-    if (!canAppend && appendToExisting) {
-      setAppendToExisting(false);
-    }
-  }, [appendToExisting, canAppend]);
 
   const buildConnectionPayload = () => {
     if (sourceType === 'database') {
@@ -193,22 +177,7 @@ export default function IngestionPage() {
   };
 
   const validateConnectionInputs = () => {
-    if (sourceType === 'file') {
-      if (!fileState.file) {
-        return 'Select a CSV or Parquet file before submitting.';
-      }
-
-      return '';
-    }
-
     if (sourceType === 'database') {
-      if (databaseState.subType === 'parquet') {
-        if (!databaseState.file) {
-          return 'Select a Parquet file before submitting.';
-        }
-        return '';
-      }
-
       if (databaseState.subType === 'mongodb') {
         if (isBlank(databaseState.uri)) {
           return 'Enter the MongoDB URI before submitting.';
@@ -290,54 +259,16 @@ export default function IngestionPage() {
         throw new Error(validationMessage);
       }
 
-      let response;
+      const response = await connectDatabase(buildConnectionPayload());
 
-      if (sourceType === 'file' || (sourceType === 'database' && databaseState.subType === 'parquet')) {
-        const isParquetDb = sourceType === 'database' && databaseState.subType === 'parquet';
-        const fileToUpload = isParquetDb ? databaseState.file : fileState.file;
-        const formatToUse = isParquetDb ? 'parquet' : fileState.format;
-
-        if (!fileToUpload) {
-          throw new Error(`Select a ${formatToUse.toUpperCase()} file before submitting.`);
-        }
-
-        const formData = new FormData();
-        formData.append('source_type', 'file');
-        formData.append('sub_type', formatToUse);
-        formData.append('file', fileToUpload);
-
-        response = await uploadDataset(formData);
-      } else {
-        response = await connectDatabase(buildConnectionPayload());
-      }
-
-      if (mode === 'append') {
-        const appendedData = appendDataset(response);
-
-        if (!appendedData) {
-          throw new Error(
-            'Append is available only for datasets with row-level data loaded in this session.',
-          );
-        }
-
-        setAppendToExisting(false);
-        pushToast({
-          tone: 'success',
-          title: 'Dataset appended',
-          message:
-            appendedData.message ||
-            `${response.dataset?.name || 'Dataset'} was appended successfully.`,
-        });
-      } else {
-        replaceDataset(response);
-        pushToast({
-          tone: 'success',
-          title: mode === 'replace' ? 'Dataset replaced' : 'Source connected',
-          message:
-            response.message ||
-            `${response.dataset?.name || 'Dataset'} is ready for validation.`,
-        });
-      }
+      replaceDataset(response);
+      pushToast({
+        tone: 'success',
+        title: mode === 'replace' ? 'Dataset replaced' : 'Source connected',
+        message:
+          response.message ||
+          `${response.dataset?.name || 'Dataset'} is ready for validation.`,
+      });
 
       navigate('/rules');
     } catch (error) {
@@ -373,11 +304,6 @@ export default function IngestionPage() {
     }
 
     if (hasExistingDataset) {
-      if (appendToExisting && canAppend) {
-        await executeSubmit('append');
-        return;
-      }
-
       setConfirmationState({
         type: 'replace',
         title: 'Dataset already exists',
@@ -404,7 +330,6 @@ export default function IngestionPage() {
   const handleConfirmAction = async () => {
     if (confirmationState.type === 'reset') {
       resetDataset();
-      setAppendToExisting(false);
       setSubmitError('');
       closeConfirmation();
 
@@ -433,9 +358,9 @@ export default function IngestionPage() {
                 Register a governed source and capture its schema metadata
               </h3>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                Select an enterprise dataset, SQL source, API source, or cloud
-                warehouse. CSV upload remains available for demos, but the core
-                workflow is source registration and reusable validation.
+                Select an enterprise database, API source, or cloud warehouse.
+                The current workflow is source registration and reusable SQL
+                validation through the backend rule APIs.
               </p>
             </div>
 
@@ -461,19 +386,6 @@ export default function IngestionPage() {
             onChange={setSourceType}
             disabled={submitting}
           />
-
-          {sourceType === 'file' && (
-            <FileUpload
-              value={fileState}
-              onChange={setFileState}
-              disabled={submitting}
-              appendToExisting={appendToExisting}
-              onAppendToggle={setAppendToExisting}
-              showAppendOption={hasExistingDataset}
-              canAppend={canAppend}
-              currentDatasetName={selectedDataset?.name}
-            />
-          )}
 
           {sourceType === 'database' && (
             <DatabaseForm
@@ -519,7 +431,7 @@ export default function IngestionPage() {
                 title={
                   selectedDataset
                     ? 'Open the rule builder for the active dataset.'
-                    : 'Upload a dataset to start validation.'
+                    : 'Connect a source to start validation.'
                 }
               >
                 Open Rule Builder
@@ -564,7 +476,7 @@ export default function IngestionPage() {
                 </h3>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
                   {selectedDataset
-                    ? 'Manage the active dataset lifecycle here. You can reset the current context, replace it with a new source, or append new row-backed file data.'
+                    ? 'Manage the active dataset lifecycle here. You can reset the current context or replace it with a new source.'
                     : 'Connect a dataset to populate schema metadata, validation controls, and execution history.'}
                 </p>
               </div>
@@ -604,16 +516,10 @@ export default function IngestionPage() {
                   Lifecycle Mode
                 </p>
                 <p className="mt-2 text-lg font-semibold text-white">
-                  {appendToExisting && canAppend
-                    ? 'Append on next upload'
-                    : hasExistingDataset
-                      ? 'Replace on next upload'
-                      : 'Fresh connection'}
+                  {hasExistingDataset ? 'Replace on next connection' : 'Fresh connection'}
                 </p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  {appendToExisting && canAppend
-                    ? 'The next file upload will merge rows and recompute the schema.'
-                    : 'Uploading or connecting a new dataset will replace the current one after confirmation.'}
+                  Connecting a new source will replace the current one after confirmation.
                 </p>
               </div>
             </div>
@@ -652,7 +558,7 @@ export default function IngestionPage() {
               <div className="subtle-card">
                 <p className="text-sm font-semibold text-white">1. Connect</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Submit a structured connector payload for files, databases, APIs,
+                  Submit a structured connector payload for databases, APIs,
                 or cloud warehouses.
                 </p>
               </div>

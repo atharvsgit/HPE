@@ -66,6 +66,9 @@ const getRowsFromResponse = (response = {}) => {
 };
 
 const getResultCount = (response = {}, rows = []) =>
+  response.result?.violation_count ??
+  response.result?.observed_value ??
+  response.observed_value ??
   response.result_count ??
   response.resultCount ??
   response.result_rows_count ??
@@ -76,6 +79,16 @@ const getResultCount = (response = {}, rows = []) =>
   response.failed_rows_count ??
   rows.length ??
   0;
+
+const normalizeStatus = (status) => {
+  const normalized = String(status || '').toUpperCase();
+
+  if (['PASS', 'FAIL', 'ERROR'].includes(normalized)) {
+    return normalized;
+  }
+
+  return status || 'completed';
+};
 
 export const normalizeRule = (rule = {}) => ({
   id: rule.id ?? rule.rule_id ?? rule.uuid ?? `rule-${Date.now()}`,
@@ -117,14 +130,17 @@ export const normalizeRuleResult = (response = {}, fallback = {}) => {
       fallback.datasetName ??
       'Enterprise dataset',
     sql: response.sql ?? response.query ?? fallback.sql ?? '',
-    status: response.status ?? 'completed',
+    status: normalizeStatus(response.status),
     executionTime: toIsoString(
       response.execution_time ??
         response.executed_at ??
         response.created_at ??
         fallback.executionTime,
     ),
-    duration: response.duration ?? response.summary?.executionTime ?? fallback.duration ?? 'backend recorded',
+    duration:
+      response.execution_time_ms !== undefined
+        ? `${response.execution_time_ms}ms`
+        : response.duration ?? response.summary?.executionTime ?? fallback.duration ?? 'backend recorded',
     checkedRows,
     passedRows,
     failedRows: resultCount,
@@ -136,6 +152,7 @@ export const normalizeRuleResult = (response = {}, fallback = {}) => {
       fallback.expectedResult ??
       { type: 'zero_violations' },
     source: response.source ?? fallback.source ?? 'backend',
+    error: response.error ?? response.error_message ?? null,
   };
 };
 
@@ -232,6 +249,8 @@ export async function createSavedRule(payload) {
     rule_name: payload.rule_name || payload.ruleName,
     sql: payload.sql,
     expected_result: payload.expected_result || { type: 'zero_violations' },
+    schedule_cron: payload.schedule_cron ?? payload.scheduleCron ?? null,
+    is_enabled: payload.is_enabled ?? payload.isEnabled ?? true,
   };
 
   try {
@@ -263,27 +282,6 @@ export async function getSavedRules() {
   } catch (error) {
     if (error.code === 'ERR_NETWORK') {
       return [...mockSavedRules];
-    }
-    throw error;
-  }
-}
-
-export async function deleteSavedRule(ruleId) {
-  if (!ruleId) {
-    throw new Error('A rule id is required before deleting a saved rule.');
-  }
-
-  try {
-    await api.delete(`/rules/${ruleId}`);
-    return { id: ruleId, deleted: true, source: 'backend' };
-  } catch (error) {
-    if (error.status === 404 || error.status === 405) {
-      throw new Error('Backend does not currently support deleting rules. This action is safely mocked as unsupported.');
-    }
-    if (error.code === 'ERR_NETWORK') {
-      mockSavedRules = mockSavedRules.filter((r) => String(r.id) !== String(ruleId));
-      saveMockState('mockSavedRules', mockSavedRules);
-      return { id: ruleId, deleted: true, source: 'mock' };
     }
     throw error;
   }

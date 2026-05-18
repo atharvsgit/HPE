@@ -158,11 +158,18 @@ const toColumnTypeGroup = (dataType = '') => {
 const quoteIdentifier = (value = '') =>
   `"${String(value).replace(/"/g, '""')}"`;
 
+const quoteQualifiedIdentifier = (value = '') =>
+  String(value || 'business_data.employees')
+    .split('.')
+    .filter(Boolean)
+    .map(quoteIdentifier)
+    .join('.');
+
 const getDatasetSqlName = (dataset) =>
   dataset?.tableName ||
   dataset?.table ||
   dataset?.name?.replace(/\.[^.]+$/, '').replace(/[^\w]+/g, '_') ||
-  'active_dataset';
+  'business_data.employees';
 
 const buildSqlFromRule = ({
   dataset,
@@ -171,31 +178,31 @@ const buildSqlFromRule = ({
   semanticMode,
   params: ruleParams,
 }) => {
-  const tableName = quoteIdentifier(getDatasetSqlName(dataset));
+  const tableName = quoteQualifiedIdentifier(getDatasetSqlName(dataset));
   const columnName = quoteIdentifier(column || 'column_name');
 
   if (semanticMode === 'query') {
     if (rule === 'between') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} BETWEEN ${ruleParams.min || 0} AND ${ruleParams.max || OPEN_ENDED_MAX};`;
+      return `SELECT COUNT(*) AS observed_value\nFROM ${tableName}\nWHERE ${columnName} BETWEEN ${ruleParams.min || 0} AND ${ruleParams.max || OPEN_ENDED_MAX};`;
     }
     if (rule === 'regex') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} ~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
+      return `SELECT COUNT(*) AS observed_value\nFROM ${tableName}\nWHERE ${columnName} ~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
     }
     if (rule === 'equals') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} = '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
+      return `SELECT COUNT(*) AS observed_value\nFROM ${tableName}\nWHERE ${columnName} = '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
     }
-    return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NOT NULL;`;
+    return `SELECT COUNT(*) AS observed_value\nFROM ${tableName}\nWHERE ${columnName} IS NOT NULL;`;
   } else {
     if (rule === 'between') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} < ${ruleParams.min || 0}\n   OR ${columnName} > ${ruleParams.max || OPEN_ENDED_MAX};`;
+      return `SELECT COUNT(*) AS violation_count\nFROM ${tableName}\nWHERE ${columnName} < ${ruleParams.min || 0}\n   OR ${columnName} > ${ruleParams.max || OPEN_ENDED_MAX};`;
     }
     if (rule === 'regex') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} !~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
+      return `SELECT COUNT(*) AS violation_count\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} !~ '${String(ruleParams.pattern || '').replace(/'/g, "''")}';`;
     }
     if (rule === 'equals') {
-      return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} != '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
+      return `SELECT COUNT(*) AS violation_count\nFROM ${tableName}\nWHERE ${columnName} IS NULL\n   OR ${columnName} != '${String(ruleParams.value || '').replace(/'/g, "''")}';`;
     }
-    return `SELECT *\nFROM ${tableName}\nWHERE ${columnName} IS NULL;`;
+    return `SELECT COUNT(*) AS violation_count\nFROM ${tableName}\nWHERE ${columnName} IS NULL;`;
   }
 };
 
@@ -216,6 +223,11 @@ const toValidationResultsShape = (result, localPayload) => ({
   resultRows: result.rows,
   persistedResult: result,
 });
+
+const expectedResultForMode = (mode) =>
+  mode === 'query'
+    ? { type: 'min_threshold', value: 1 }
+    : { type: 'zero_violations' };
 
 function ResultSummaryCard({ label, value, hint }) {
   return (
@@ -239,7 +251,7 @@ export default function RuleBuilder() {
 
   const [selectedColumn, setSelectedColumn] = useState('');
   const [selectedRule, setSelectedRule] = useState('between');
-  const [semanticMode, setSemanticMode] = useState('query');
+  const [semanticMode, setSemanticMode] = useState('validation');
   const [params, setParams] = useState({
     min: '',
     max: '',
@@ -318,7 +330,7 @@ export default function RuleBuilder() {
     const issues = {};
 
     if (!selectedDataset) {
-      issues.dataset = 'Upload a dataset to start validation.';
+      issues.dataset = 'Connect a source to start validation.';
     }
 
     if (!schemaMetadata.length) {
@@ -647,9 +659,7 @@ export default function RuleBuilder() {
           dataset_name: selectedDataset?.name,
           rule_name: ruleName.trim() || 'Business validation rule',
           sql: sqlText.trim() || generatedSqlPreview,
-          expected_result: {
-            type: 'zero_violations',
-          },
+          expected_result: expectedResultForMode(semanticMode),
         },
         {
           datasetRows,
@@ -663,7 +673,7 @@ export default function RuleBuilder() {
       pushToast({
         tone: 'success',
         title: 'Rule executed',
-        message: `${response.resultRows ?? response.failedRows ?? 0} matching rows were saved in history.`,
+        message: `Observed value ${response.resultRows ?? response.failedRows ?? 0} was saved in history.`,
       });
     } catch (error) {
       pushToast({
@@ -686,9 +696,7 @@ export default function RuleBuilder() {
         dataset_name: selectedDataset?.name,
         rule_name: ruleName.trim() || 'Business validation rule',
         sql: sqlText.trim() || generatedSqlPreview,
-        expected_result: {
-          type: 'zero_violations',
-        },
+        expected_result: expectedResultForMode(semanticMode),
       });
 
       pushToast({
@@ -857,7 +865,7 @@ export default function RuleBuilder() {
                   />
                 </div>
                 <p className="field-hint">
-                  This SQL is sent to `/rules/run`, and the returned rows are saved in history.
+                  This SQL is sent to `/rules/run`, and the aggregate result is saved in history.
                 </p>
               </div>
             </div>
@@ -1155,7 +1163,7 @@ export default function RuleBuilder() {
               disabled={!canRunValidation}
               title={
                 canRunValidation
-                  ? 'Run the selected rule and save the returned rows.'
+                  ? 'Run the selected rule and save the aggregate result.'
                   : primaryValidationMessage || 'Load a dataset to start validation.'
               }
               className="primary-button w-full disabled:cursor-not-allowed disabled:opacity-50"
@@ -1190,7 +1198,7 @@ export default function RuleBuilder() {
           <div>
             <p className="section-kicker">Rule Results</p>
             <h3 className="mt-4 text-3xl font-semibold text-white">
-              Rows returned by your rule
+              Aggregate result returned by your rule
             </h3>
             <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
               The result table shows only the records that match the rule you entered,
@@ -1236,13 +1244,13 @@ export default function RuleBuilder() {
                 hint="Rows scanned for this rule"
               />
               <ResultSummaryCard
-                label="Result Rows"
+                label="Observed"
                 value={
                   validationResults.summary?.resultRows ??
                   validationResults.summary?.failedRows ??
                   0
                 }
-                hint="Rows returned by the rule"
+                hint="Aggregate value returned by the rule"
               />
               <ResultSummaryCard
                 label="Rule"
@@ -1253,13 +1261,13 @@ export default function RuleBuilder() {
 
             <ResultTable
               rows={validationResults.resultRows || validationResults.failedRows || []}
-              title="Returned Rows"
-              description="Search, page, and inspect the rows returned by the backend SQL execution."
-              emptyTitle={noRowsInRun ? 'No rows matched this rule' : 'No returned rows'}
+              title="Row Payload"
+              description="The current daemon stores aggregate rule outcomes, not violating row payloads."
+              emptyTitle={noRowsInRun ? 'No row payload stored' : 'No row payload'}
               emptyMessage={
                 noRowsInRun
-                  ? 'The rule ran successfully, but the dataset did not contain matching rows.'
-                  : 'Run another rule to inspect a different slice of the dataset.'
+                  ? 'The rule ran successfully and stored the aggregate result.'
+                  : 'Run another rule to store another aggregate result.'
               }
             />
           </div>
@@ -1269,7 +1277,7 @@ export default function RuleBuilder() {
               Results will appear here
             </p>
             <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Load a dataset, enter a rule, and run it to see the rows returned by your request.
+              Connect a source, enter a rule, and run it to see the aggregate result.
             </p>
           </div>
         )}

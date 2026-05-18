@@ -32,7 +32,7 @@ const navigation = [
   {
     path: '/history',
     label: 'Validation History',
-    description: 'Revisit saved rules, executions, SQL, and returned rows.',
+    description: 'Revisit saved rules, executions, SQL, and aggregate outcomes.',
     eyebrow: 'Audit',
   },
 ];
@@ -56,7 +56,7 @@ const getWorkspaceStatus = ({ selectedDataset, validationResults, resultRows }) 
     return {
       label: 'Rule Completed',
       tone: 'success',
-      helper: `${resultRows} rows were returned in the latest run.`,
+      helper: `${resultRows} was returned by the latest aggregate rule.`,
     };
   }
 
@@ -212,7 +212,7 @@ function AppShell() {
                   <div
                     key={item.path}
                     className="nav-link nav-link-disabled"
-                    title="Upload a dataset to start validation."
+                    title="Connect a source to start validation."
                     aria-disabled="true"
                   >
                     <span>
@@ -223,7 +223,7 @@ function AppShell() {
                         {item.label}
                       </span>
                       <span className="mt-1 block text-xs text-slate-500">
-                        Upload a dataset to unlock this workspace.
+                        Connect a source to unlock this workspace.
                       </span>
                     </span>
                     <span className="text-xs uppercase tracking-[0.24em] text-slate-500">
@@ -292,9 +292,9 @@ function AppShell() {
                 hint="Rows represented in the current source"
               />
               <MetricTile
-                label="Result Rows"
+                label="Observed"
                 value={formatCompactNumber(resultRows)}
-                hint="Rows returned by latest rule"
+                hint="Latest aggregate value"
               />
             </div>
           </div>
@@ -359,7 +359,7 @@ function AppShell() {
                     <MetricTile
                       label="Results"
                       value={resultRows}
-                      hint="Rows returned by latest rule"
+                      hint="Latest aggregate value"
                     />
                   </div>
                 </div>
@@ -372,7 +372,7 @@ function AppShell() {
                   <span
                     key={item.path}
                     className="pill-button pill-button-disabled whitespace-nowrap"
-                    title="Upload a dataset to start validation."
+                    title="Connect a source to start validation."
                   >
                     {item.label}
                   </span>

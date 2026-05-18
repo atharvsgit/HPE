@@ -6,7 +6,6 @@ import StatusBadge from '../components/common/StatusBadge';
 import { useDataset } from '../context/DatasetContext';
 import {
   createSavedRule,
-  deleteSavedRule,
   getSavedRules,
   getRuleResults,
   runSavedRule,
@@ -19,20 +18,25 @@ const formatDateTime = (value) =>
   }).format(new Date(value));
 
 const statusTone = (status) => {
-  if (status === 'completed' || status === 'active') {
+  const normalized = String(status || '').toUpperCase();
+
+  if (['PASS', 'COMPLETED', 'ACTIVE'].includes(normalized)) {
     return 'success';
+  }
+
+  if (normalized === 'FAIL' || normalized === 'ERROR') {
+    return 'error';
   }
 
   return 'pending';
 };
 
-function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, deletingRuleId, runningRuleId }) {
+function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, runningRuleId }) {
   const [expanded, setExpanded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const canDeleteRule = Boolean(result.ruleId);
-  const returnedRows = result.resultRows ?? result.failedRows ?? 0;
+  const observedValue = result.resultRows ?? result.failedRows ?? 0;
 
-  const isDeleting = deletingRuleId === result.ruleId;
   const isRunning = runningRuleId === result.ruleId;
 
   const handleSave = async () => {
@@ -58,7 +62,7 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, deletingRule
             </span>
             <span className="text-slate-600">•</span>
             <span className="text-xs font-medium text-slate-300">
-              {returnedRows} rows returned
+              {observedValue} observed
             </span>
           </div>
 
@@ -119,21 +123,18 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, deletingRule
             View
           </button>
 
-          <button
-            type="button"
-            onClick={() => onDeleteRule(result.ruleId, result.ruleName, result.id)}
-            disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"
-          >
-            {isDeleting ? <Loader label="" compact /> : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                Delete
-              </>
-            )}
-          </button>
+          {!canDeleteRule && (
+            <button
+              type="button"
+              onClick={() => onDeleteRule(result.ruleId, result.ruleName, result.id)}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Remove
+            </button>
+          )}
         </div>
       </div>
 
@@ -168,7 +169,6 @@ export default function ValidationHistoryPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [runningRuleId, setRunningRuleId] = useState('');
-  const [deletingRuleId, setDeletingRuleId] = useState('');
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [error, setError] = useState('');
 
@@ -282,40 +282,13 @@ export default function ValidationHistoryPage() {
       return;
     }
 
-    const previousRules = savedRules;
-    const previousHistory = history;
-
-    setDeletingRuleId(ruleId);
-    setError('');
-    setSavedRules((currentRules) =>
-      currentRules.filter((rule) => String(rule.id) !== String(ruleId)),
-    );
-    setHistory((currentHistory) =>
-      currentHistory.filter((entry) => String(entry.ruleId) !== String(ruleId)),
-    );
+    setError('The current backend does not support deleting saved rules.');
     closeDeleteModal();
-
-    try {
-      await deleteSavedRule(ruleId);
-      pushToast({
-        tone: 'success',
-        title: 'Saved rule deleted',
-        message: `${deleteCandidate.ruleName || 'Rule'} was removed from the saved rule registry.`,
-      });
-    } catch (deleteError) {
-      setSavedRules(previousRules);
-      setHistory(previousHistory);
-      setError(deleteError.message || 'The saved rule could not be deleted.');
-      pushToast({
-        tone: 'error',
-        title: 'Delete unavailable',
-        message:
-          deleteError.message ||
-          'The saved rule could not be deleted because the backend endpoint is unavailable.',
-      });
-    } finally {
-      setDeletingRuleId('');
-    }
+    pushToast({
+      tone: 'error',
+      title: 'Delete unavailable',
+      message: 'The current backend exposes rule creation and execution, but not saved-rule deletion.',
+    });
   };
 
   return (
@@ -328,7 +301,7 @@ export default function ValidationHistoryPage() {
               Persistent rule execution timeline
             </h2>
             <p className="mt-5 max-w-4xl text-base leading-7 text-slate-400">
-              Every rule run is retained with dataset, SQL, status, returned rows,
+              Every rule run is retained with dataset, SQL, status, observed values,
               and execution time so analysts and compliance reviewers can revisit
               older validations alongside the newest runs.
             </p>
@@ -353,7 +326,7 @@ export default function ValidationHistoryPage() {
                   0,
                 )}
               </p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">Rows returned by rules</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">Aggregate values returned by rules</p>
             </div>
           </div>
         </div>
@@ -398,18 +371,6 @@ export default function ValidationHistoryPage() {
                   className="secondary-button mt-4 w-full"
                 >
                   {runningRuleId === rule.id ? <Loader label="Running" compact /> : 'Run Saved Rule'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => requestDeleteRule(rule.id, rule.ruleName)}
-                  disabled={deletingRuleId === rule.id}
-                  className="secondary-button danger-button mt-3 w-full"
-                >
-                  {deletingRuleId === rule.id ? (
-                    <Loader label="Deleting" compact />
-                  ) : (
-                    'Delete Rule'
-                  )}
                 </button>
               </div>
             ))}
@@ -458,7 +419,6 @@ export default function ValidationHistoryPage() {
                 <ResultPanel
                   key={result.id}
                   result={result}
-                  deletingRuleId={deletingRuleId}
                   runningRuleId={runningRuleId}
                   onDeleteRule={requestDeleteRule}
                   onRunRule={handleRunHistoryRule}
