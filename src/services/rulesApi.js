@@ -11,25 +11,15 @@ const toIsoString = (value) => {
     : parsedDate.toISOString();
 };
 
-const loadMockState = (key) => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveMockState = (key, data) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch {}
-};
-
-let mockSavedRules = loadMockState('mockSavedRules');
-let mockRuleResults = loadMockState('mockRuleResults');
-
 const getRowsFromResponse = (response = {}) => {
+  if (Array.isArray(response.violation_rows)) {
+    return response.violation_rows;
+  }
+
+  if (Array.isArray(response.violationRows)) {
+    return response.violationRows;
+  }
+
   if (Array.isArray(response.failedRows)) {
     return response.failedRows;
   }
@@ -93,7 +83,7 @@ const normalizeStatus = (status) => {
 export const normalizeRule = (rule = {}) => ({
   id: rule.id ?? rule.rule_id ?? rule.uuid ?? `rule-${Date.now()}`,
   ruleName: rule.rule_name ?? rule.ruleName ?? rule.name ?? 'Untitled rule',
-  datasetName: rule.dataset_name ?? rule.datasetName ?? rule.dataset ?? 'Enterprise dataset',
+  datasetName: rule.dataset_name ?? rule.datasetName ?? rule.dataset ?? 'Company database',
   sql: rule.sql ?? rule.query ?? '',
   expectedResult: rule.expected_result ?? rule.expectedResult ?? { type: 'zero_violations' },
   createdAt: toIsoString(rule.created_at ?? rule.createdAt),
@@ -128,7 +118,7 @@ export const normalizeRuleResult = (response = {}, fallback = {}) => {
       response.dataset_name ??
       response.datasetName ??
       fallback.datasetName ??
-      'Enterprise dataset',
+      'Company database',
     sql: response.sql ?? response.query ?? fallback.sql ?? '',
     status: normalizeStatus(response.status),
     executionTime: toIsoString(
@@ -156,92 +146,22 @@ export const normalizeRuleResult = (response = {}, fallback = {}) => {
   };
 };
 
-const simulateLocalExecution = (payload, datasetRows, localPayload) => {
-  const rule = localPayload.rule || 'custom_sql';
-  const column = localPayload.column;
-  let resultRows = [];
-
-  if (datasetRows && datasetRows.length > 0 && column) {
-    resultRows = datasetRows.filter(row => {
-      const val = row[column];
-      let isMatch = false;
-
-      if (rule === 'not_null') {
-        isMatch = val !== null && val !== undefined && String(val).trim() !== '';
-      } else if (rule === 'equals') {
-        isMatch = String(val).trim() === String(localPayload.value || '').trim();
-      } else if (rule === 'regex') {
-        if (!val) {
-          isMatch = false;
-        } else {
-          try {
-            isMatch = new RegExp(localPayload.pattern).test(String(val));
-          } catch {
-            isMatch = false;
-          }
-        }
-      } else if (rule === 'between') {
-        const num = Number(val);
-        if (!isNaN(num)) {
-          isMatch = num >= Number(localPayload.min) && num <= Number(localPayload.max);
-        }
-      } else {
-        isMatch = true;
-      }
-
-      return localPayload.semanticMode === 'query' ? isMatch : !isMatch;
-    });
-  }
-
-  const resultCount = resultRows.length;
-  const checkedRows = datasetRows ? datasetRows.length : 0;
-
-  return {
-    id: `sim-${Date.now()}`,
-    ruleId: localPayload.rule_id || null,
-    ruleName: localPayload.rule_name || payload.rule_name || payload.ruleName || 'Simulated Rule',
-    datasetId: localPayload.dataset_id || payload.dataset_id,
-    datasetName: localPayload.dataset_name || payload.dataset_name || 'Local Dataset',
-    sql: localPayload.sql || payload.sql || '-- simulated execution',
-    status: 'completed',
-    executionTime: new Date().toISOString(),
-    duration: Math.max(0.1, (checkedRows * 0.0005)).toFixed(2) + 's',
-    checkedRows,
-    passedRows: localPayload.semanticMode === 'query' ? resultCount : checkedRows - resultCount,
-    failedRows: localPayload.semanticMode === 'query' ? checkedRows - resultCount : resultCount,
-    resultRows: resultCount,
-    rows: resultRows.slice(0, 100),
-    expectedResult: { type: 'zero_violations' },
-    source: 'local_simulation'
-  };
-};
-
-export async function runAdHocRule(payload, { datasetRows = [], localPayload = {} } = {}) {
+export async function runAdHocRule(payload) {
   const requestPayload = {
     rule_name: payload.rule_name || payload.ruleName || 'Ad hoc business rule',
     sql: payload.sql,
     expected_result: payload.expected_result || { type: 'zero_violations' },
   };
 
-  try {
-    const { data } = await api.post('/rules/run', requestPayload);
+  const { data } = await api.post('/rules/run', requestPayload);
 
-    return normalizeRuleResult(data, {
-      ruleName: requestPayload.rule_name,
-      datasetId: payload.dataset_id,
-      datasetName: payload.dataset_name,
-      sql: requestPayload.sql,
-      expectedResult: requestPayload.expected_result,
-    });
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      const result = simulateLocalExecution(payload, datasetRows, localPayload);
-      mockRuleResults.push(result);
-      saveMockState('mockRuleResults', mockRuleResults);
-      return result;
-    }
-    throw error;
-  }
+  return normalizeRuleResult(data, {
+    ruleName: requestPayload.rule_name,
+    datasetId: payload.dataset_id,
+    datasetName: payload.dataset_name,
+    sql: requestPayload.sql,
+    expectedResult: requestPayload.expected_result,
+  });
 }
 
 export async function createSavedRule(payload) {
@@ -253,38 +173,14 @@ export async function createSavedRule(payload) {
     is_enabled: payload.is_enabled ?? payload.isEnabled ?? true,
   };
 
-  try {
-    const { data } = await api.post('/rules', requestPayload);
-    return normalizeRule(data);
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      const newRule = {
-        id: `mock-${Date.now()}`,
-        ruleName: requestPayload.rule_name,
-        sql: requestPayload.sql,
-        expectedResult: requestPayload.expected_result,
-        status: 'active',
-        createdAt: new Date().toISOString()
-      };
-      mockSavedRules.push(newRule);
-      saveMockState('mockSavedRules', mockSavedRules);
-      return newRule;
-    }
-    throw error;
-  }
+  const { data } = await api.post('/rules', requestPayload);
+  return normalizeRule(data);
 }
 
 export async function getSavedRules() {
-  try {
-    const { data } = await api.get('/rules');
-    const rules = Array.isArray(data) ? data : data?.rules || [];
-    return rules.map(normalizeRule);
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      return [...mockSavedRules];
-    }
-    throw error;
-  }
+  const { data } = await api.get('/rules');
+  const rules = Array.isArray(data) ? data : data?.rules || [];
+  return rules.map(normalizeRule);
 }
 
 export async function getRuleResults(ruleId) {
@@ -292,80 +188,28 @@ export async function getRuleResults(ruleId) {
     return [];
   }
 
-  try {
-    if (ruleId === 'all') {
-      await api.get('/rules').catch(err => {
-        if (err.code === 'ERR_NETWORK') throw err;
-      });
-      const rules = await getSavedRules();
-      const allResults = await Promise.all(
-        rules.map(rule => api.get(`/rules/${rule.id}/results`).catch(() => ({ data: [] })))
-      );
-      const flattened = allResults.flatMap((res, index) => {
-        const data = Array.isArray(res.data) ? res.data : res.data?.results || [];
-        return data.map((result) => normalizeRuleResult(result, { ruleId: rules[index].id }));
-      });
-      return flattened.sort((a, b) => new Date(b.executionTime).getTime() - new Date(a.executionTime).getTime());
-    }
-
-    const { data } = await api.get(`/rules/${ruleId}/results`);
+  if (ruleId === 'all') {
+    const { data } = await api.get('/results');
     const results = Array.isArray(data) ? data : data?.results || [];
-    return results.map((result) => normalizeRuleResult(result, { ruleId }));
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      if (ruleId === 'all') {
-        return [...mockRuleResults].sort((a, b) => new Date(b.executionTime).getTime() - new Date(a.executionTime).getTime());
-      }
-      return mockRuleResults.filter(r => String(r.ruleId) === String(ruleId)).sort((a, b) => new Date(b.executionTime).getTime() - new Date(a.executionTime).getTime());
-    }
-    throw error;
+    return results.map((result) => normalizeRuleResult(result));
   }
+
+  const { data } = await api.get(`/rules/${ruleId}/results`);
+  const results = Array.isArray(data) ? data : data?.results || [];
+  return results.map((result) => normalizeRuleResult(result, { ruleId }));
 }
 
 export async function runSavedRule(ruleId, fallbackRule = {}) {
-  try {
-    const { data } = await api.post(`/rules/${ruleId}/run`);
-    return normalizeRuleResult(data, {
-      ruleId,
-      ruleName: fallbackRule.ruleName,
-      datasetName: fallbackRule.datasetName,
-      sql: fallbackRule.sql,
-    });
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      return {
-        id: `sim-${Date.now()}`,
-        ruleId,
-        ruleName: fallbackRule.ruleName || 'Simulated Rule',
-        datasetName: fallbackRule.datasetName || 'Local Dataset',
-        sql: fallbackRule.sql || '-- simulated execution',
-        status: 'completed',
-        executionTime: new Date().toISOString(),
-        duration: '0.10s',
-        checkedRows: 1,
-        passedRows: 0,
-        failedRows: 1,
-        resultRows: 1,
-        rows: [{ info: 'Backend required to execute pure SQL', query: fallbackRule.sql || 'N/A' }],
-        expectedResult: { type: 'zero_violations' },
-        source: 'local_simulation'
-      };
-      mockRuleResults.push(result);
-      saveMockState('mockRuleResults', mockRuleResults);
-      return result;
-    }
-    throw error;
-  }
+  const { data } = await api.post(`/rules/${ruleId}/run`);
+  return normalizeRuleResult(data, {
+    ruleId,
+    ruleName: fallbackRule.ruleName,
+    datasetName: fallbackRule.datasetName,
+    sql: fallbackRule.sql,
+  });
 }
 
 export async function getSchedulerRules() {
-  try {
-    const { data } = await api.get('/scheduler/rules');
-    return Array.isArray(data) ? data : data?.rules || [];
-  } catch (error) {
-    if (error.code === 'ERR_NETWORK') {
-      return [];
-    }
-    throw error;
-  }
+  const { data } = await api.get('/scheduler/rules');
+  return Array.isArray(data) ? data : data?.rules || [];
 }

@@ -147,7 +147,7 @@ body {
     @apply bg-rose-500/10 text-rose-400 border border-rose-500/20;
   }
 
-  /* Replacing visual hero box with a flatter, cleaner container */
+  /* Replacing visual hero box with a flatter container */
   .hero-visual {
     @apply rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm;
   }

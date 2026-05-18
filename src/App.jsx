@@ -13,8 +13,8 @@ const ValidationHistoryPage = lazy(() => import('./pages/ValidationHistoryPage')
 const navigation = [
   {
     path: '/',
-    label: 'Dataset Workspace',
-    description: 'Register enterprise datasets, SQL sources, APIs, and warehouses.',
+    label: 'Database',
+    description: 'Connect the company database used by validation rules.',
     eyebrow: 'Connect',
   },
   {
@@ -25,8 +25,8 @@ const navigation = [
   },
   {
     path: '/dashboard',
-    label: 'Command Center',
-    description: 'Review rule execution activity and business validation status.',
+    label: 'Run Dashboard',
+    description: 'Review rule execution activity and scheduler status.',
     eyebrow: 'Operate',
   },
   {
@@ -46,9 +46,9 @@ const formatCompactNumber = (value) =>
 const getWorkspaceStatus = ({ selectedDataset, validationResults, resultRows }) => {
   if (!selectedDataset) {
     return {
-      label: 'No Dataset',
+      label: 'No Database',
       tone: 'pending',
-      helper: 'Connect a source to unlock validation and history.',
+      helper: 'Connect the company database to unlock validation and history.',
     };
   }
 
@@ -61,19 +61,19 @@ const getWorkspaceStatus = ({ selectedDataset, validationResults, resultRows }) 
   }
 
   return {
-    label: 'Dataset Loaded',
+    label: 'Database Connected',
     tone: 'success',
-    helper: 'Schema metadata is ready for rule authoring.',
+    helper: 'Database table metadata is ready for rule authoring.',
   };
 };
 
 function MetricTile({ label, value, hint }) {
   return (
-    <div className="metric-card">
+    <div className="metric-card min-w-0">
       <div className="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/50 to-transparent" />
       <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
-      <p className="mt-3 text-2xl font-bold text-white">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{hint}</p>
+      <p className="mt-3 max-w-full break-all text-2xl font-bold leading-8 text-white">{value}</p>
+      <p className="mt-2 max-w-full break-all text-sm leading-6 text-slate-400">{hint}</p>
     </div>
   );
 }
@@ -106,7 +106,7 @@ function AppShell() {
           <div className="flex items-center justify-between">
             <div>
               <p className="section-kicker">Validation</p>
-              <h1 className="mt-2 text-xl font-semibold text-white">DVC Workspace</h1>
+              <h1 className="mt-2 text-xl font-semibold text-white">DQ Workspace</h1>
             </div>
             <div className="brand-badge flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold text-cyan-100">
               DVC
@@ -119,7 +119,7 @@ function AppShell() {
                 <div
                   key={item.path}
                   className="nav-link nav-link-disabled"
-                  title="Connect a dataset to start rule execution."
+                  title="Connect the database to start rule execution."
                   aria-disabled="true"
                 >
                   <span>
@@ -127,7 +127,7 @@ function AppShell() {
                       {item.label}
                     </span>
                     <span className="mt-1 block text-xs text-slate-500">
-                      Connect a dataset first.
+                      Connect the database first.
                     </span>
                   </span>
                   <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -159,15 +159,15 @@ function AppShell() {
           <div className="mt-auto space-y-4">
             <div className="subtle-card">
               <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
-                Active Dataset
+                Active Database
               </p>
               <div className="mt-3">
                 <StatusBadge tone={workspaceStatus.tone}>
                   {workspaceStatus.label}
                 </StatusBadge>
               </div>
-              <p className="mt-3 text-sm font-semibold text-white">
-                {selectedDataset?.name || 'No dataset connected'}
+              <p className="mt-3 max-w-full break-all text-sm font-semibold leading-6 text-white">
+                {selectedDataset?.name || 'No database connected'}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
                 {workspaceStatus.helper}
@@ -190,13 +190,13 @@ function AppShell() {
             </div>
 
             <p className="mt-4 text-sm leading-6 text-slate-400">
-              A richer control plane for onboarding data, building rules, and
-                  executing business rules, and preserving validation evidence for
-                  analysts, operations, and compliance teams.
+              A focused control plane for connecting the company database,
+              executing SQL rules, and preserving validation evidence for
+              analysts, operations, and compliance teams.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-2">
-              {['Schema-aware', 'Persistent history', 'SQL execution'].map((chip) => (
+              {['Database-backed', 'Persistent history', 'SQL execution'].map((chip) => (
                 <span
                   key={chip}
                   className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300"
@@ -212,7 +212,7 @@ function AppShell() {
                   <div
                     key={item.path}
                     className="nav-link nav-link-disabled"
-                    title="Connect a source to start validation."
+                    title="Connect the database to start validation."
                     aria-disabled="true"
                   >
                     <span>
@@ -223,7 +223,7 @@ function AppShell() {
                         {item.label}
                       </span>
                       <span className="mt-1 block text-xs text-slate-500">
-                        Connect a source to unlock this workspace.
+                        Connect the database to unlock this workspace.
                       </span>
                     </span>
                     <span className="text-xs uppercase tracking-[0.24em] text-slate-500">
@@ -261,19 +261,19 @@ function AppShell() {
 
           <div className="space-y-4">
             <div className="subtle-card">
-              <p className="section-kicker">Active Dataset</p>
+              <p className="section-kicker">Active Database</p>
               <div className="mt-3">
                 <StatusBadge tone={workspaceStatus.tone}>
                   {workspaceStatus.label}
                 </StatusBadge>
               </div>
-              <h2 className="mt-3 text-lg font-semibold text-white">
-                {selectedDataset?.name || 'No dataset connected'}
+              <h2 className="mt-3 max-w-full break-all text-lg font-semibold leading-7 text-white">
+                {selectedDataset?.name || 'No database connected'}
               </h2>
               <p className="mt-2 text-sm text-slate-400">
                 {selectedDataset
-                  ? `${selectedDataset.sourceType} source via ${selectedDataset.subType}`
-                  : 'Connect a source to unlock schema-aware validation and execution history.'}
+                  ? 'PostgreSQL database connection'
+                  : 'Connect the company database to unlock validation and execution history.'}
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-400">
                 {workspaceStatus.helper}
@@ -284,12 +284,12 @@ function AppShell() {
               <MetricTile
                 label="Columns"
                 value={formatCompactNumber(schemaMetadata.length)}
-                hint="Schema fields profiled"
+                hint="Table columns available"
               />
               <MetricTile
                 label="Records"
                 value={formatCompactNumber(selectedDataset?.records)}
-                hint="Rows represented in the current source"
+                hint="Rows reported by the database"
               />
               <MetricTile
                 label="Observed"
@@ -309,7 +309,7 @@ function AppShell() {
                   Enterprise Validation Workspace
                 </h2>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-                  Move from dataset onboarding to rule entry, SQL execution, saved
+                  Move from database connection to rule entry, SQL execution, saved
                   rules, and history in one clear sequence.
                 </p>
 
@@ -318,13 +318,13 @@ function AppShell() {
                     {workspaceStatus.label}
                   </StatusBadge>
                   <span className="status-chip">
-                    Dataset governance
+                    Database rules
                   </span>
                   <span className="status-chip">
                     Saved executions
                   </span>
                   <span className="status-chip">
-                    Backend-ready APIs
+                    Docker Postgres
                   </span>
                 </div>
               </div>
@@ -335,26 +335,26 @@ function AppShell() {
                     <p className="text-xs uppercase tracking-[0.24em] text-cyan-300/70">
                       Live Command Deck
                     </p>
-                    <p className="mt-2 text-lg font-semibold text-white">
-                      {selectedDataset?.name || 'Waiting for a connected dataset'}
+                    <p className="mt-2 max-w-full break-all text-lg font-semibold leading-7 text-white">
+                      {selectedDataset?.name || 'Waiting for a connected database'}
                     </p>
                     <p className="mt-2 text-sm leading-6 text-slate-400">
                       {selectedDataset
                         ? `Tracking ${selectedDataset.records || 0} rows across ${schemaMetadata.length} columns.`
-                      : 'Connect a source to populate schema metadata, business rules, and validation history.'}
+                      : 'Connect the database to populate table metadata, business rules, and validation history.'}
                     </p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
                     <MetricTile
-                      label="Dataset"
+                      label="Database"
                       value={selectedDataset ? 'Ready' : 'Pending'}
-                      hint={selectedDataset?.name || 'Awaiting source connection'}
+                      hint={selectedDataset?.name || 'Awaiting database connection'}
                     />
                     <MetricTile
                       label="Schema"
                       value={schemaMetadata.length || 0}
-                      hint="Profiled columns"
+                      hint="Table columns"
                     />
                     <MetricTile
                       label="Results"
@@ -372,7 +372,7 @@ function AppShell() {
                   <span
                     key={item.path}
                     className="pill-button pill-button-disabled whitespace-nowrap"
-                    title="Connect a source to start validation."
+                    title="Connect the database to start validation."
                   >
                     {item.label}
                   </span>

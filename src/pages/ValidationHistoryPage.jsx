@@ -52,15 +52,15 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, runningRuleI
           <div className="flex flex-wrap items-center gap-2">
             <span className={`inline-block h-2 w-2 rounded-full ${statusTone(result.status) === 'success' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
             <h3 className="text-sm font-semibold text-slate-200 truncate">{result.ruleName}</h3>
-            <span className="text-slate-600">•</span>
+            <span className="text-slate-600">/</span>
             <span className="text-xs text-slate-400">
               {result.datasetName}
             </span>
-            <span className="text-slate-600">•</span>
+            <span className="text-slate-600">/</span>
             <span className="text-xs text-slate-400">
               {formatDateTime(result.executionTime)}
             </span>
-            <span className="text-slate-600">•</span>
+            <span className="text-slate-600">/</span>
             <span className="text-xs font-medium text-slate-300">
               {observedValue} observed
             </span>
@@ -147,12 +147,32 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, runningRuleI
             </pre>
           </div>
 
+          <div>
+            <p className="field-label">Stored Outcome</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                ['Status', result.status || 'Unknown'],
+                ['Observed Value', observedValue],
+                ['Duration', `${result.duration ?? 0} ms`],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-md border border-slate-800 bg-[#0d1117]/80 px-3 py-2">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-200">{value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              Saved history stores the aggregate outcome. Manual runs can also
+              return a live preview of violating rows.
+            </p>
+          </div>
+
           <ResultTable
             rows={result.rows || []}
-            title="Returned Rows"
-            description="Rows returned by this execution."
-            emptyTitle="No row payload stored"
-            emptyMessage="This execution stored aggregate status only."
+            title="Violating Rows Preview"
+            description="Rows are shown when this item came from a freshly executed rule response."
+            emptyTitle="No row preview on this history item"
+            emptyMessage="Stored history keeps aggregate results; run the saved rule again to view a fresh row preview."
             pageSize={5}
           />
         </div>
@@ -301,7 +321,7 @@ export default function ValidationHistoryPage() {
               Persistent rule execution timeline
             </h2>
             <p className="mt-5 max-w-4xl text-base leading-7 text-slate-400">
-              Every rule run is retained with dataset, SQL, status, observed values,
+              Every rule run is retained with database context, SQL, status, observed values,
               and execution time so analysts and compliance reviewers can revisit
               older validations alongside the newest runs.
             </p>
@@ -319,7 +339,7 @@ export default function ValidationHistoryPage() {
               <p className="mt-2 text-sm leading-6 text-slate-400">Registry entries</p>
             </div>
             <div className="metric-card">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Returned Rows</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Observed Values</p>
               <p className="mt-3 text-2xl font-bold text-white">
                 {history.reduce(
                   (total, entry) => total + Number(entry.resultRows ?? entry.failedRows ?? 0),
@@ -344,7 +364,7 @@ export default function ValidationHistoryPage() {
           >
             <p className="text-sm font-semibold text-white">All executions</p>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              Search across local and backend-normalized validation history.
+              Search across backend-normalized validation history.
             </p>
           </button>
 
@@ -398,7 +418,7 @@ export default function ValidationHistoryPage() {
               type="text"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search by rule, dataset, SQL, or status"
+              placeholder="Search by rule, database, SQL, or status"
               className="input-shell lg:max-w-sm"
             />
           </div>

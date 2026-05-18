@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -36,3 +36,9 @@ class SavedRuleCreateRequest(BaseModel):
     expected_result: ExpectedResult
     schedule_cron: str | None = None
     is_enabled: bool = True
+
+
+class DatabaseConnectionRequest(BaseModel):
+    source_type: Literal["database"] = "database"
+    sub_type: Literal["postgresql"] = "postgresql"
+    config: dict[str, Any]

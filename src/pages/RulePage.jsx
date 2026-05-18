@@ -12,11 +12,11 @@ export default function RulePage() {
       }
     : selectedDataset
       ? {
-          label: 'Dataset Loaded',
+          label: 'Database Connected',
           tone: 'success',
         }
       : {
-          label: 'No Dataset',
+          label: 'No Database',
           tone: 'pending',
         };
 
@@ -32,21 +32,21 @@ export default function RulePage() {
               </StatusBadge>
             </div>
             <h3 className="mt-3 text-2xl font-semibold text-white">
-              Enter rules and get matching rows
+              Enter SQL rules and review aggregate outcomes
             </h3>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-              Use natural language, SQL, or the schema-aware builder. Each run
-              checks the active dataset and returns the rows that match your rule.
+              Use SQL or the guided builder. Each run checks the active database
+              table through the backend daemon and stores the aggregate outcome.
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="subtle-card">
               <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                Dataset
+                Database
               </p>
               <p className="mt-2 text-sm font-semibold text-white">
-                {selectedDataset?.name || 'No dataset connected'}
+                {selectedDataset?.name || 'No database connected'}
               </p>
             </div>
             <div className="subtle-card">
@@ -54,7 +54,7 @@ export default function RulePage() {
                 Columns
               </p>
               <p className="mt-2 text-sm font-semibold text-white">
-                {schemaMetadata.length || 0} profiled fields
+                {schemaMetadata.length || 0} table fields
               </p>
             </div>
           </div>
@@ -67,18 +67,17 @@ export default function RulePage() {
         <section className="glass-panel p-6">
           <div className="empty-state">
             <p className="text-lg font-semibold text-white">
-              Connect a dataset to start validation
+              Connect the database to start validation
             </p>
             <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Connect a dataset on the dataset workspace first so the rule builder
-              can load schema-aware columns, available rule types, and row-level
-              validation results.
+              Connect the company database first so the rule builder can load
+              table columns and run backend SQL aggregate checks.
             </p>
             <Link
               to="/"
               className="primary-button mt-6"
             >
-              Go to Dataset Workspace
+              Go to Database Connection
             </Link>
           </div>
         </section>

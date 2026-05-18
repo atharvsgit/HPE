@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Loader from '../components/common/Loader';
-import ResultTable from '../components/common/ResultTable';
 import Skeleton from '../components/common/Skeleton';
 import StatusBadge from '../components/common/StatusBadge';
 import { useDataset } from '../context/DatasetContext';
@@ -46,7 +45,7 @@ function ExecutionFeed({ executions }) {
         <p className="text-lg font-semibold text-white">No rule executions yet</p>
         <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
           Run a business rule from the Rule Workspace to start building permanent
-          validation intelligence for this dataset.
+          validation history for the company database.
         </p>
         <Link to="/rules" className="primary-button mt-6">
           Open Rule Workspace
@@ -59,7 +58,7 @@ function ExecutionFeed({ executions }) {
     <div className="relative border-l border-slate-800 ml-3 md:ml-4 space-y-6">
       {executions.slice(0, 8).map((execution) => (
         <div key={execution.id} className="relative pl-6 md:pl-8 group">
-          <div className={`absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-[#111827] ${execution.status === 'completed' || execution.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <div className={`absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-[#111827] ${String(execution.status).toUpperCase() === 'PASS' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3">
@@ -68,9 +67,9 @@ function ExecutionFeed({ executions }) {
               </div>
               <p className="mt-1 text-xs text-slate-400 font-mono truncate">{execution.sql || 'No SQL recorded'}</p>
               <div className="mt-3 flex items-center gap-4 text-xs font-medium text-slate-300">
-                <span className="flex items-center gap-1.5"><span className="text-slate-500">Dataset:</span> {execution.datasetName}</span>
-                <span className="flex items-center gap-1.5"><span className="text-slate-500">Returned:</span> {execution.resultRows ?? execution.failedRows ?? 0}</span>
-                <span className="flex items-center gap-1.5"><span className="text-slate-500">Scanned:</span> {execution.checkedRows}</span>
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Database:</span> {execution.datasetName}</span>
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Observed:</span> {execution.resultRows ?? execution.failedRows ?? 0}</span>
+                <span className="flex items-center gap-1.5"><span className="text-slate-500">Status:</span> {execution.status}</span>
               </div>
             </div>
             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -86,7 +85,7 @@ function ExecutionFeed({ executions }) {
 }
 
 export default function DashboardPage() {
-  const { selectedDataset, schemaMetadata, validationResults, datasetRows } = useDataset();
+  const { selectedDataset, schemaMetadata, validationResults } = useDataset();
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState([]);
   const [savedRules, setSavedRules] = useState([]);
@@ -136,9 +135,9 @@ export default function DashboardPage() {
     return {
       totalResults,
       latestExecution,
-      activeRows: datasetRows.length || selectedDataset?.records || 0,
+      activeRows: selectedDataset?.records || 0,
     };
-  }, [datasetRows.length, history, selectedDataset?.records]);
+  }, [history, selectedDataset?.records]);
 
   return (
     <div className="space-y-10">
@@ -147,17 +146,17 @@ export default function DashboardPage() {
           <div>
             <p className="section-kicker">Enterprise Validation Workspace</p>
             <h2 className="mt-4 max-w-4xl text-4xl font-semibold text-white">
-              Business rule operations for governed datasets
+              Business rule operations for the company database
             </h2>
             <p className="mt-5 max-w-4xl text-base leading-7 text-slate-400">
-              A simple workspace for daily use: connect a dataset, run the rules
-              you care about, and revisit the rows returned by each run.
+              A simple workspace for daily use: connect the database, run saved
+              SQL quality rules, and review persisted aggregate outcomes.
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[32rem]">
             <Link to="/" className="secondary-button">
-              Dataset Workspace
+              Database Connection
             </Link>
             <Link to="/rules" className="primary-button">
               Execute Rule
@@ -181,15 +180,15 @@ export default function DashboardPage() {
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <WorkspaceMetric
-              label="Active Dataset"
+              label="Active Database"
               value={selectedDataset ? 'Ready' : 'Pending'}
-              hint={selectedDataset?.name || 'Connect an enterprise dataset to begin.'}
+              hint={selectedDataset?.name || 'Connect the company database to begin.'}
               tone={selectedDataset ? 'success' : 'neutral'}
             />
             <WorkspaceMetric
               label="Schema Fields"
               value={schemaMetadata.length}
-              hint={`${workspaceSummary.activeRows} rows available for validation.`}
+              hint={`${workspaceSummary.activeRows} database rows reported by the connection.`}
             />
             <WorkspaceMetric
               label="Saved Rules"
@@ -197,9 +196,9 @@ export default function DashboardPage() {
               hint={`${schedulerRules.length} scheduler classifications available from backend.`}
             />
             <WorkspaceMetric
-              label="Rows Returned"
+              label="Observed Values"
               value={workspaceSummary.totalResults}
-              hint="Total rows returned across saved executions."
+              hint="Total aggregate values returned across executions."
               tone={workspaceSummary.totalResults ? 'success' : 'neutral'}
             />
           </section>
@@ -224,25 +223,15 @@ export default function DashboardPage() {
             </div>
 
             <div className="glass-panel p-6 sm:p-8 lg:p-10">
-              <ResultTable
-                rows={workspaceSummary.latestExecution?.rows || []}
-                title="Latest Returned Rows"
-                description="The newest execution result is shown as a real data table with search and pagination."
-                emptyTitle="No returned rows yet"
-                emptyMessage="Run a rule from the Rule Workspace to populate this table from backend execution results."
-              />
-            </div>
-
-            <div className="glass-panel p-6 sm:p-8 lg:p-10">
-                <p className="section-kicker">Dataset Activity</p>
+                <p className="section-kicker">Database Activity</p>
                 <h3 className="mt-3 text-2xl font-semibold text-white">
-                  Source summary
+                  Connection summary
                 </h3>
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   {[
-                    ['Dataset', selectedDataset?.name || 'Not connected'],
-                    ['Source Type', selectedDataset?.sourceType || 'Pending'],
-                    ['Connector', selectedDataset?.subType || 'Pending'],
+                    ['Database', selectedDataset?.name || 'Not connected'],
+                    ['Table', selectedDataset?.tableName || selectedDataset?.table || 'Pending'],
+                    ['Connection', selectedDataset?.subType || 'Pending'],
                     ['Last Execution', formatDateTime(workspaceSummary.latestExecution?.executionTime)],
                   ].map(([label, value]) => (
                     <div
@@ -262,7 +251,7 @@ export default function DashboardPage() {
                 <p className="section-kicker">Validation Lifecycle</p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   {[
-                    ['Connect source', Boolean(selectedDataset)],
+                    ['Connect database', Boolean(selectedDataset)],
                     ['Load schema', schemaMetadata.length > 0],
                     ['Save rules', savedRules.length > 0],
                     ['Persist results', history.length > 0],

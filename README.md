@@ -289,7 +289,7 @@ Results created by the scheduler have the saved rule's `rule_id`.
 
 The database has three schemas:
 
-- `business_data`: sample source tables checked by validation SQL
+- `business_data`: sample company database tables checked by validation SQL
 - `dq_config`: saved rule metadata
 - `dq_results`: persisted execution results
 
@@ -363,22 +363,21 @@ The tests cover evaluator behavior, SQL safety validation, cron parsing, schedul
 
 ## Frontend Application
 
-The merged frontend is a React and TailwindCSS single-page application for a data quality and observability workflow.
+The merged frontend is a React and TailwindCSS single-page application for the database-backed data quality workflow.
 
 Frontend features:
 
-- Multi-source data ingestion forms for CSV, DB, API, and cloud inputs
-- Schema display and local dataset state management
+- PostgreSQL database connection form
+- Table schema display and local connection state management
 - Dynamic rule builder UI
 - Validation history page
-- Observability dashboard with health, anomaly, drift, and failure views
+- Dashboard for saved rules, scheduler classifications, and persisted aggregate execution results
 
 Frontend tech stack:
 
 - React
 - Vite
 - TailwindCSS
-- Chart.js
 - Axios
 
 Run the frontend locally:
@@ -396,11 +395,10 @@ Frontend scripts:
 
 Frontend folder structure:
 
-- `src/components/ingestion`: source selection, file upload, database/API/cloud forms, schema table
+- `src/components/ingestion`: PostgreSQL database form and schema table
 - `src/components/ruleBuilder`: rule authoring and validation results UI
-- `src/components/dashboard`: health, anomaly, drift, and failure visualizations
 - `src/components/common`: shared UI utilities such as loaders, toasts, modals, and badges
 - `src/pages`: route-level pages for ingestion, rules, validation history, and dashboard
-- `src/services`: Axios client, endpoint wrappers, rules API wrappers, and local derived-metrics utilities
-- `src/context`: shared dataset state across ingestion, rule building, and observability
+- `src/services`: Axios client, endpoint wrappers, and rules API wrappers
+- `src/context`: shared database connection state across connection, rule building, and dashboard views
 - `src/assets`: visual assets for the application shell

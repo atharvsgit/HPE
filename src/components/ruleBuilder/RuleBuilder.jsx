@@ -330,7 +330,7 @@ export default function RuleBuilder() {
     const issues = {};
 
     if (!selectedDataset) {
-      issues.dataset = 'Connect a source to start validation.';
+      issues.dataset = 'Connect the company database to start validation.';
     }
 
     if (!schemaMetadata.length) {
@@ -472,7 +472,7 @@ export default function RuleBuilder() {
       pushToast({
         tone: 'error',
         title: 'Column not recognized',
-        message: 'Try referencing a column name that appears in the dataset schema.',
+        message: 'Try referencing a column name that appears in the database table schema.',
       });
       return;
     }
@@ -717,21 +717,17 @@ export default function RuleBuilder() {
     }
   };
 
-  const noRowsInRun =
-    validationResults &&
-    (validationResults.summary?.resultRows ?? validationResults.summary?.failedRows ?? 0) === 0;
-
   return (
     <div className="space-y-10">
       <section className="glass-panel p-6 sm:p-8 lg:p-10">
         <div className="border-b border-white/10 pb-8">
           <p className="section-kicker">Author Rule</p>
           <h3 className="mt-4 text-3xl font-semibold text-white">
-            Ask a question from your dataset
+            Ask a question from your database
           </h3>
           <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
-            Enter a plain-English rule or write SQL directly. The app checks the
-            dataset and returns the rows that match what you asked for.
+            Enter a plain-English rule or write SQL directly. The backend runs a
+            safe aggregate query against the connected company database.
           </p>
         </div>
 
@@ -743,7 +739,7 @@ export default function RuleBuilder() {
                   Rule Assistant
                 </label>
                 <p className="field-hint">
-                  Describe what you want to find in the dataset. The generated SQL remains editable.
+                  Describe the database condition you want to validate. The generated SQL remains editable.
                 </p>
               </div>
               <button
@@ -762,7 +758,7 @@ export default function RuleBuilder() {
               value={nlInput}
               onChange={(event) => setNlInput(event.target.value)}
               rows="4"
-              placeholder="Show students with attendance less than 70"
+              placeholder="Show employees with negative salary"
               className="input-shell mt-4 min-h-[120px] resize-y"
             />
 
@@ -787,7 +783,7 @@ export default function RuleBuilder() {
               <div>
                 <p className="field-label mb-0">Authoring Mode</p>
                 <p className="field-hint">
-                  Use the assistant, guided fields, or direct SQL editing against the active dataset.
+                  Use the assistant, guided fields, or direct SQL editing against the active database table.
                 </p>
               </div>
               <div className="inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-1">
@@ -949,7 +945,7 @@ export default function RuleBuilder() {
                 className={`selection-card ${semanticMode === 'query' ? 'selection-card-active' : ''}`}
               >
                 <p className="text-sm font-semibold text-white">Query Mode</p>
-                <p className="mt-1 text-xs text-slate-400">Match rows (BETWEEN min AND max)</p>
+                <p className="mt-1 text-xs text-slate-400">Count rows that match the condition</p>
               </button>
               <button
                 type="button"
@@ -957,7 +953,7 @@ export default function RuleBuilder() {
                 className={`selection-card ${semanticMode === 'validation' ? 'selection-card-active' : ''}`}
               >
                 <p className="text-sm font-semibold text-white">Validation Mode</p>
-                <p className="mt-1 text-xs text-slate-400">Find violations (&lt; min OR &gt; max)</p>
+                <p className="mt-1 text-xs text-slate-400">Count rows that violate the condition</p>
               </button>
             </div>
           </div>
@@ -1164,7 +1160,7 @@ export default function RuleBuilder() {
               title={
                 canRunValidation
                   ? 'Run the selected rule and save the aggregate result.'
-                  : primaryValidationMessage || 'Load a dataset to start validation.'
+                  : primaryValidationMessage || 'Connect the database to start validation.'
               }
               className="primary-button w-full disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1201,8 +1197,8 @@ export default function RuleBuilder() {
               Aggregate result returned by your rule
             </h3>
             <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
-              The result table shows only the records that match the rule you entered,
-              without extra scoring or risk labels.
+              The daemon persists the aggregate value, pass/fail status, SQL,
+              execution time, and error details for each run.
             </p>
           </div>
 
@@ -1239,7 +1235,7 @@ export default function RuleBuilder() {
           <div className="mt-6 space-y-6">
             <div className="grid gap-4 md:grid-cols-3">
               <ResultSummaryCard
-                label="Dataset Rows"
+                label="Database Rows"
                 value={validationResults.summary?.checkedRows || 0}
                 hint="Rows scanned for this rule"
               />
@@ -1259,16 +1255,38 @@ export default function RuleBuilder() {
               />
             </div>
 
+            <div className="subtle-card">
+              <p className="text-sm font-semibold text-white">Persisted Result</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                The backend stores the aggregate outcome and returns a preview of
+                violating rows for count-based violation checks.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {[
+                  ['Status', validationResults.summary?.status || 'Unknown'],
+                  [
+                    'Observed Value',
+                    validationResults.summary?.resultRows ??
+                      validationResults.summary?.failedRows ??
+                      0,
+                  ],
+                  ['Executed At', validationResults.summary?.executionTime || 'Pending'],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
+                    <p className="mt-2 text-sm font-semibold text-white">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <ResultTable
               rows={validationResults.resultRows || validationResults.failedRows || []}
-              title="Row Payload"
-              description="The current daemon stores aggregate rule outcomes, not violating row payloads."
-              emptyTitle={noRowsInRun ? 'No row payload stored' : 'No row payload'}
-              emptyMessage={
-                noRowsInRun
-                  ? 'The rule ran successfully and stored the aggregate result.'
-                  : 'Run another rule to store another aggregate result.'
-              }
+              title="Violating Rows Preview"
+              description="Preview rows returned from the same WHERE condition used by the violation count."
+              emptyTitle="No violating rows returned"
+              emptyMessage="Either the rule passed or this SQL shape does not support row preview."
+              pageSize={10}
             />
           </div>
         ) : (
@@ -1277,7 +1295,7 @@ export default function RuleBuilder() {
               Results will appear here
             </p>
             <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Connect a source, enter a rule, and run it to see the aggregate result.
+              Connect the database, enter a rule, and run it to see the aggregate result.
             </p>
           </div>
         )}
