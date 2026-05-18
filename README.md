@@ -360,3 +360,47 @@ docker compose run --rm --no-deps api pytest
 ```
 
 The tests cover evaluator behavior, SQL safety validation, cron parsing, scheduler classification, scheduled execution dispatch, ad hoc execution behavior, saved-rule endpoint behavior, manual saved-rule execution, and saved-rule result retrieval.
+
+## Frontend Application
+
+The merged frontend is a React and TailwindCSS single-page application for a data quality and observability workflow.
+
+Frontend features:
+
+- Multi-source data ingestion forms for CSV, DB, API, and cloud inputs
+- Schema display and local dataset state management
+- Dynamic rule builder UI
+- Validation history page
+- Observability dashboard with health, anomaly, drift, and failure views
+
+Frontend tech stack:
+
+- React
+- Vite
+- TailwindCSS
+- Chart.js
+- Axios
+
+Run the frontend locally:
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend scripts:
+
+- `npm run dev`: start the local development server
+- `npm run build`: create a production build
+- `npm run preview`: preview the production build locally
+
+Frontend folder structure:
+
+- `src/components/ingestion`: source selection, file upload, database/API/cloud forms, schema table
+- `src/components/ruleBuilder`: rule authoring and validation results UI
+- `src/components/dashboard`: health, anomaly, drift, and failure visualizations
+- `src/components/common`: shared UI utilities such as loaders, toasts, modals, and badges
+- `src/pages`: route-level pages for ingestion, rules, validation history, and dashboard
+- `src/services`: Axios client, endpoint wrappers, rules API wrappers, and local derived-metrics utilities
+- `src/context`: shared dataset state across ingestion, rule building, and observability
+- `src/assets`: visual assets for the application shell

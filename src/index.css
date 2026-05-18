@@ -1,0 +1,252 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background-color: #0B0F19; /* Solid enterprise dark slate */
+  color: #e2e8f0;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.28);
+  color: #f8fafc;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: 'Inter', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  /* Flat enterprise panels replacing glowing glass panels */
+  .glass-panel {
+    @apply rounded-xl border border-slate-800 bg-[#0d1117] shadow-sm;
+  }
+
+  .glass-panel-soft {
+    @apply rounded-xl border border-slate-800/60 bg-slate-900/50 shadow-sm;
+  }
+
+  .section-kicker {
+    @apply text-[0.75rem] font-semibold uppercase tracking-widest text-slate-400;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-300;
+  }
+
+  .field-hint {
+    @apply mt-1.5 text-sm text-slate-400;
+  }
+
+  .field-error {
+    @apply mt-1.5 text-sm font-medium text-rose-400;
+  }
+
+  .input-shell {
+    @apply w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 transition-colors focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .sql-editor-shell {
+    @apply w-full rounded-lg border border-slate-700 bg-[#0d1117] px-4 py-4 font-mono text-sm leading-relaxed text-slate-300 placeholder:text-slate-600 shadow-inner shadow-black/10 transition-colors focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .input-shell-error {
+    @apply border-rose-500/50 focus:border-rose-500 focus:ring-rose-500/20;
+  }
+
+  .subtle-card {
+    @apply rounded-xl border border-slate-800/80 bg-slate-900/40 p-6 sm:p-8 transition-colors hover:border-slate-700;
+  }
+
+  .metric-card {
+    @apply rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 sm:p-6 transition-colors hover:border-slate-700;
+  }
+
+  .nav-link {
+    @apply flex items-center justify-between rounded-lg border border-transparent px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/50 hover:text-slate-200;
+  }
+
+  .nav-link-active {
+    @apply bg-sky-500/10 text-sky-400 font-semibold;
+  }
+
+  .nav-link-disabled {
+    @apply cursor-not-allowed text-slate-600 opacity-60 hover:bg-transparent hover:text-slate-600;
+  }
+
+  .pill-button {
+    @apply rounded-full border border-slate-700 bg-slate-800/50 px-4 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .pill-button-active {
+    @apply border-slate-500 bg-slate-700 text-white;
+  }
+
+  .pill-button-disabled {
+    @apply cursor-not-allowed border-slate-800 bg-slate-900/50 text-slate-600 hover:border-slate-800 hover:text-slate-600;
+  }
+
+  .empty-state {
+    @apply flex min-h-[200px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/30 p-8 text-center;
+  }
+
+  .status-chip {
+    @apply rounded-md border border-slate-700 bg-slate-800/50 px-2.5 py-1 text-xs font-medium text-slate-300;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .status-badge-success {
+    @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
+  }
+
+  .status-badge-pending {
+    @apply bg-amber-500/10 text-amber-400 border border-amber-500/20;
+  }
+
+  .status-badge-error {
+    @apply bg-rose-500/10 text-rose-400 border border-rose-500/20;
+  }
+
+  /* Replacing visual hero box with a flatter, cleaner container */
+  .hero-visual {
+    @apply rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm;
+  }
+
+  .hero-visual-copy {
+    @apply mb-4 rounded-lg border border-slate-700/50 bg-slate-800/30 p-4;
+  }
+
+  .primary-button {
+    @apply inline-flex items-center justify-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .secondary-button {
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .danger-button {
+    @apply border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/50;
+  }
+
+  .selection-card {
+    @apply rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 text-left transition-colors hover:bg-slate-800/80 hover:border-slate-700;
+  }
+
+  .selection-card-active {
+    @apply border-sky-500/60 bg-sky-500/10;
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-xl border border-slate-800 bg-[#111827] shadow-sm;
+  }
+
+  .table-scroll {
+    @apply overflow-auto;
+  }
+
+  .data-table {
+    @apply min-w-full divide-y divide-slate-800 text-left text-sm;
+  }
+
+  .data-table-head {
+    @apply sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800;
+  }
+
+  .data-table-header-cell {
+    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .data-table-cell {
+    @apply px-4 py-3 align-top text-sm text-slate-300;
+  }
+
+  .data-table-row {
+    @apply transition-colors hover:bg-slate-800/40;
+  }
+
+  .data-table-row-danger {
+    @apply transition-colors hover:bg-rose-500/10;
+  }
+
+  .dropzone-shell {
+    @apply flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-700 bg-slate-900/40 p-6 text-center transition-colors hover:border-slate-500 hover:bg-slate-800/50;
+  }
+
+  .inline-banner {
+    @apply rounded-lg border px-4 py-3 text-sm;
+  }
+
+  .inline-banner-error {
+    @apply border-rose-500/30 bg-rose-500/10 text-rose-200;
+  }
+
+  .inline-banner-info {
+    @apply border-sky-500/30 bg-sky-500/10 text-sky-200;
+  }
+}
+
+/* Animations that are subtle and professional */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.04),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
