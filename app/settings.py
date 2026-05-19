@@ -34,13 +34,19 @@ class Settings(BaseModel):
     max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "5"))
     pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
-    rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120"))
+    rule_execution_jitter_seconds: int = int(
+        os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120")
+    )
     slack_webhook_url: str | None = os.getenv("SLACK_WEBHOOK_URL")
     smtp_server: str | None = os.getenv("SMTP_SERVER")
     smtp_port: int | None = _optional_int("SMTP_PORT", 587)
     smtp_username: str | None = os.getenv("SMTP_USERNAME")
     smtp_password: str | None = os.getenv("SMTP_PASSWORD")
-    smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
+    smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     smtp_timeout_seconds: float = float(os.getenv("SMTP_TIMEOUT_SECONDS", "5"))
     notification_http_timeout_seconds: float = float(
         os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "5")
@@ -50,6 +56,18 @@ class Settings(BaseModel):
         "alerts@dataqualitydaemon.local",
     )
     admin_email: str | None = os.getenv("ADMIN_EMAIL")
+
+    llm_provider: str = os.getenv("LLM_PROVIDER", "mock")
+    llm_model: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+    llm_api_key: str | None = os.getenv("LLM_API_KEY")
+    llm_request_timeout_seconds: int = int(
+        os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "30")
+    )
+    llm_dry_run_enabled: bool = os.getenv("LLM_DRY_RUN_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 @lru_cache

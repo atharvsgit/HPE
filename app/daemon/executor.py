@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import time
-import re
 import logging
+import re
+import time
 from collections.abc import Mapping
-from datetime import date
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -14,7 +13,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.daemon.evaluator import evaluate_observed_value
 from app.daemon.notifier import notify_admin_of_failure
-from app.daemon.sql_safety import SQLSafetyError, strip_trailing_semicolon, validate_safe_select
+from app.daemon.sql_safety import (
+    SQLSafetyError,
+    strip_trailing_semicolon,
+    validate_safe_select,
+)
 from app.db.session import engine as db_engine
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import ErrorDetail, RuleExecutionResult
@@ -50,7 +53,9 @@ def _numeric_value(raw_value: Any) -> Decimal:
         return Decimal(raw_value)
     if isinstance(raw_value, float):
         return Decimal(str(raw_value))
-    raise ValueError(f"Expected a numeric aggregate result, got {type(raw_value).__name__}.")
+    raise ValueError(
+        f"Expected a numeric aggregate result, got {type(raw_value).__name__}."
+    )
 
 
 def _error_type(exc: Exception) -> str:
@@ -60,7 +65,9 @@ def _error_type(exc: Exception) -> str:
     return "SQL_EXECUTION_ERROR"
 
 
-async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
+async def execute_rule(
+    rule: RuleExecutionRequest, persist: bool = True
+) -> RuleExecutionResult:
     started = time.perf_counter()
     executed_at = datetime.now(UTC)
     settings = get_settings()
@@ -79,8 +86,9 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
             executed_at=executed_at,
             error=ErrorDetail(type=exc.code, message=str(exc)),
         )
-        await _persist_result(rule, result, None, None)
-        await _notify_if_needed(rule, result)
+        if persist:
+            await _persist_result(rule, result, None, None)
+            await _notify_if_needed(rule, result)
         return result
 
     observed_key: str | None = None
@@ -93,7 +101,9 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
             async with conn.begin():
                 await conn.execute(text("SET TRANSACTION READ ONLY"))
                 await conn.execute(
-                    text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
+                    text(
+                        f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'"
+                    )
                 )
                 query_result = await conn.execute(text(wrapped_sql))
                 rows = query_result.mappings().all()
@@ -103,7 +113,9 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
 
         row = dict(rows[0])
         if len(row) != 1:
-            raise ResultShapeError(f"Expected exactly one result column, got {len(row)}.")
+            raise ResultShapeError(
+                f"Expected exactly one result column, got {len(row)}."
+            )
 
         observed_key, raw_value = next(iter(row.items()))
         if observed_key not in {"violation_count", "observed_value"}:
@@ -173,8 +185,9 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
             error=ErrorDetail(type="UNKNOWN_ERROR", message=str(exc)),
         )
 
-    await _persist_result(rule, result, observed_key, observed_value)
-    await _notify_if_needed(rule, result)
+    if persist:
+        await _persist_result(rule, result, observed_key, observed_value)
+        await _notify_if_needed(rule, result)
     return result
 
 
@@ -182,7 +195,9 @@ class ResultShapeError(Exception):
     pass
 
 
-async def _notify_if_needed(rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
+async def _notify_if_needed(
+    rule: RuleExecutionRequest, result: RuleExecutionResult
+) -> None:
     if result.status in {"FAIL", "ERROR"}:
         try:
             await notify_admin_of_failure(rule, result)
@@ -217,7 +232,9 @@ async def _fetch_violation_preview(sql_body: str) -> list[dict[str, Any]]:
         async with conn.begin():
             await conn.execute(text("SET TRANSACTION READ ONLY"))
             await conn.execute(
-                text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
+                text(
+                    f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'"
+                )
             )
             preview_result = await conn.execute(text(preview_sql))
             return [_json_row(row) for row in preview_result.mappings().all()]

@@ -4,8 +4,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.ingestion_routes import router as ingestion_router
+from app.api.llm_routes import router as llm_router
 from app.api.routes import router
 from app.db.session import close_db_engine
 
@@ -34,8 +36,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 app.include_router(router)
 app.include_router(ingestion_router)
+app.include_router(llm_router)
 
 
 @app.get("/docs", include_in_schema=False)
