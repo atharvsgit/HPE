@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_routes import router as llm_router
+from app.api.platform_routes import platform_router
 from app.api.routes import router
 from app.db.session import close_db_engine
 
@@ -20,7 +21,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="NETRA Data Quality Platform",
-    version="0.2.0",
+    version="1.0.0",
+    description=(
+        "NETRA data quality platform with validation rules, ingestion, "
+        "LLM-assisted rule drafts, notifications, and Platform Intelligence orchestration."
+    ),
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
@@ -41,6 +46,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(router)
 app.include_router(ingestion_router)
 app.include_router(llm_router)
+app.include_router(platform_router)
 
 
 @app.get("/docs", include_in_schema=False)
@@ -119,7 +125,7 @@ async def redoc_html() -> HTMLResponse:
     return HTMLResponse(html)
 
 
-@app.get("/health")
+@app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 

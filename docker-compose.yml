@@ -24,6 +24,13 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-30}
       LLM_DRY_RUN_ENABLED: ${LLM_DRY_RUN_ENABLED:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RULE_SUGGESTION_BACKEND: ${RULE_SUGGESTION_BACKEND:-heuristic}
+      PROFILING_ROW_LIMIT: ${PROFILING_ROW_LIMIT:-100000}
+      ANOMALY_CONTAMINATION: ${ANOMALY_CONTAMINATION:-0.05}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      PIPELINE_EXECUTION_JITTER_SECONDS: ${PIPELINE_EXECUTION_JITTER_SECONDS:-120}
+      PREFECT_SERVER_EPHEMERAL_ENABLED: "false"
     ports:
       - "8000:8000"
 
@@ -49,6 +56,25 @@ services:
       NOTIFICATION_HTTP_TIMEOUT_SECONDS: ${NOTIFICATION_HTTP_TIMEOUT_SECONDS:-5}
       NOTIFICATION_EMAIL_FROM: ${NOTIFICATION_EMAIL_FROM:-alerts@dataqualitydaemon.local}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+
+  platform_scheduler:
+    build: .
+    container_name: dq_platform_scheduler
+    command: python -m app.platform.orchestration.task_scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      STATEMENT_TIMEOUT_MS: 15000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RULE_SUGGESTION_BACKEND: ${RULE_SUGGESTION_BACKEND:-heuristic}
+      PROFILING_ROW_LIMIT: ${PROFILING_ROW_LIMIT:-100000}
+      ANOMALY_CONTAMINATION: ${ANOMALY_CONTAMINATION:-0.05}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      PIPELINE_EXECUTION_JITTER_SECONDS: ${PIPELINE_EXECUTION_JITTER_SECONDS:-120}
+      PREFECT_SERVER_EPHEMERAL_ENABLED: "false"
 
   postgres:
     image: postgres:16
