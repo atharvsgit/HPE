@@ -1,95 +1,152 @@
+from __future__ import annotations
+
+import asyncio
+import json
 import logging
 import smtplib
-import asyncio
-import httpx
 from email.message import EmailMessage
+
+import httpx
 
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import RuleExecutionResult
-from app.settings import get_settings
+from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-async def _send_slack_notification(rule: RuleExecutionRequest, result: RuleExecutionResult, webhook_url: str) -> None:
-    rule_name = rule.rule_name or "Ad-hoc Rule"
-    message = f"*ALERT: DATA QUALITY RULE VIOLATION*\n*Rule*: {rule_name}\n*Status*: {result.status}"
-    
-    if result.status == "FAIL":
-        message += f"\n*Expected*: {rule.expected_result.type}\n*Observed*: {result.result}"
-    elif result.error:
-        message += f"\n*Error*: {result.error.message}"
 
+def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
+    lines = [
+        "DATA QUALITY RULE ALERT",
+        f"Rule: {rule.rule_name}",
+        f"Status: {result.status}",
+        f"Rule ID: {rule.rule_id if rule.rule_id is not None else 'ad hoc'}",
+    ]
+
+    if result.result is not None:
+        lines.append(f"Observed: {result.result}")
+
+    if result.violation_rows:
+        preview_count = min(len(result.violation_rows), 5)
+        preview = json.dumps(result.violation_rows[:preview_count], default=str)
+        lines.append(f"Violation rows preview ({preview_count} shown): {preview}")
+
+    lines.append(f"Expected: {rule.expected_result.type}")
+    if rule.expected_result.value is not None:
+        lines.append(f"Expected value: {rule.expected_result.value}")
+
+    if result.error is not None:
+        lines.append(f"Error: {result.error.type}: {result.error.message}")
+
+    lines.append(f"Executed at: {result.executed_at.isoformat()}")
+
+    return "\n".join(lines)
+
+
+async def _send_slack_notification(
+    rule: RuleExecutionRequest,
+    result: RuleExecutionResult,
+    webhook_url: str,
+    timeout_seconds: float,
+) -> None:
     try:
-        async with httpx.AsyncClient() as client:
-            payload = {"text": message}
-            response = await client.post(webhook_url, json=payload, timeout=5.0)
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            response = await client.post(
+                webhook_url,
+                json={"text": _notification_text(rule, result)},
+            )
             response.raise_for_status()
-            logger.info("Successfully sent Slack notification.")
-    except Exception as e:
-        logger.error(f"Failed to send Slack notification: {e}")
+        logger.info("Sent data quality alert to Slack for rule %s.", rule.rule_name)
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to send Slack data quality alert: HTTP %s",
+            exc.response.status_code,
+        )
+    except httpx.HTTPError as exc:
+        logger.error(
+            "Failed to send Slack data quality alert: %s",
+            type(exc).__name__,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to send Slack data quality alert: %s",
+            type(exc).__name__,
+        )
 
-def _send_email_notification_sync(rule: RuleExecutionRequest, result: RuleExecutionResult, settings) -> None:
-    if not (settings.smtp_server and settings.smtp_port and settings.admin_email):
-        logger.warning("Email notification skipped: missing SMTP_SERVER, SMTP_PORT, or ADMIN_EMAIL")
+
+def _send_email_notification_sync(
+    rule: RuleExecutionRequest,
+    result: RuleExecutionResult,
+    settings: Settings,
+) -> None:
+    if not settings.smtp_server or not settings.smtp_port or not settings.admin_email:
+        logger.warning(
+            "Email alert skipped: SMTP_SERVER, SMTP_PORT, or ADMIN_EMAIL is missing."
+        )
         return
 
-    rule_name = rule.rule_name or "Ad-hoc Rule"
-    
-    msg = EmailMessage()
-    msg['Subject'] = f"Data Quality Alert: {rule_name}"
-    msg['From'] = "alerts@dataqualitydaemon.local"
-    msg['To'] = settings.admin_email
-    
-    body = f"Rule Violation Detected!\n\nRule: {rule_name}\nStatus: {result.status}\n"
-    if result.status == "FAIL":
-        body += f"Observed Result: {result.result}"
-    elif result.error:
-        body += f"Error Message: {result.error.message}"
-        
-    msg.set_content(body)
+    message = EmailMessage()
+    message["Subject"] = f"Data Quality Alert: {rule.rule_name}"
+    message["From"] = settings.notification_email_from
+    message["To"] = settings.admin_email
+    message.set_content(_notification_text(rule, result))
 
     try:
-        with smtplib.SMTP(settings.smtp_server, settings.smtp_port) as server:
-            # We wrap in try-except for starttls and login in case the server doesn't support/require it
-            try:
+        with smtplib.SMTP(
+            settings.smtp_server,
+            settings.smtp_port,
+            timeout=settings.smtp_timeout_seconds,
+        ) as server:
+            if settings.smtp_use_tls:
                 server.starttls()
-            except smtplib.SMTPException:
-                pass
-                
+
             if settings.smtp_username and settings.smtp_password:
                 server.login(settings.smtp_username, settings.smtp_password)
-                
-            server.send_message(msg)
-        logger.info("Successfully sent Email notification.")
-    except Exception as e:
-        logger.error(f"Failed to send Email notification: {e}")
 
-async def _send_email_notification(rule: RuleExecutionRequest, result: RuleExecutionResult, settings) -> None:
-    # Run the synchronous smtplib in a threadpool
+            server.send_message(message)
+        logger.info("Sent data quality alert email for rule %s.", rule.rule_name)
+    except Exception as exc:
+        logger.error("Failed to send email data quality alert: %s", exc)
+
+
+async def _send_email_notification(
+    rule: RuleExecutionRequest,
+    result: RuleExecutionResult,
+    settings: Settings,
+) -> None:
     await asyncio.to_thread(_send_email_notification_sync, rule, result, settings)
 
-async def notify_admin_of_failure(rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
-    """
-    Sends a notification to the administrator when a rule fails.
-    Dispatches to configured channels (Slack, Email) simultaneously.
-    """
-    if result.status not in ("FAIL", "ERROR"):
+
+async def notify_admin_of_failure(
+    rule: RuleExecutionRequest,
+    result: RuleExecutionResult,
+) -> None:
+    if result.status not in {"FAIL", "ERROR"}:
         return
 
     settings = get_settings()
-    
     tasks = []
-    
+
     if settings.slack_webhook_url:
-        tasks.append(_send_slack_notification(rule, result, settings.slack_webhook_url))
-        
+        tasks.append(
+            _send_slack_notification(
+                rule,
+                result,
+                settings.slack_webhook_url,
+                settings.notification_http_timeout_seconds,
+            )
+        )
+
     if settings.smtp_server:
         tasks.append(_send_email_notification(rule, result, settings))
-        
-    if tasks:
-        # Run all configured notifications concurrently
-        await asyncio.gather(*tasks)
-    else:
-        # Fallback if no channels are configured
-        rule_name = rule.rule_name or "Ad-hoc Rule"
-        logger.warning(f"Rule Failed ({rule_name}) but NO notification channels are configured!")
+
+    if not tasks:
+        logger.warning(
+            "Rule %s ended with %s, but no notification channels are configured.",
+            rule.rule_name,
+            result.status,
+        )
+        return
+
+    await asyncio.gather(*tasks)

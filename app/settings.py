@@ -13,6 +13,13 @@ def _postgres_url(username: str, password_env: str) -> str:
     return f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
 
 
+def _optional_int(name: str, default: int | None = None) -> int | None:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+    return int(raw_value)
+
+
 class Settings(BaseModel):
     database_url: str = os.getenv(
         "DATABASE_URL",
@@ -28,12 +35,20 @@ class Settings(BaseModel):
     pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
     rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120"))
-    
     slack_webhook_url: str | None = os.getenv("SLACK_WEBHOOK_URL")
     smtp_server: str | None = os.getenv("SMTP_SERVER")
-    smtp_port: int | None = int(os.getenv("SMTP_PORT", "587")) if os.getenv("SMTP_PORT") else None
+    smtp_port: int | None = _optional_int("SMTP_PORT", 587)
     smtp_username: str | None = os.getenv("SMTP_USERNAME")
     smtp_password: str | None = os.getenv("SMTP_PASSWORD")
+    smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
+    smtp_timeout_seconds: float = float(os.getenv("SMTP_TIMEOUT_SECONDS", "5"))
+    notification_http_timeout_seconds: float = float(
+        os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "5")
+    )
+    notification_email_from: str = os.getenv(
+        "NOTIFICATION_EMAIL_FROM",
+        "alerts@dataqualitydaemon.local",
+    )
     admin_email: str | None = os.getenv("ADMIN_EMAIL")
 
 
