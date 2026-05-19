@@ -295,3 +295,134 @@ def test_scheduler_rules_endpoint(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()[0]["scheduler_status"] == "schedulable"
     assert response.json()[1]["scheduler_status"] == "disabled"
+
+
+# ---------------------------------------------------------------------------
+# HTTP 4xx coverage
+# ---------------------------------------------------------------------------
+
+def test_get_rule_404(monkeypatch) -> None:
+    """GET /rules/{id} returns 404 when the rule does not exist."""
+    async def fake_get_rule(rule_id: int) -> SavedRuleResponse | None:
+        return None
+
+    monkeypatch.setattr(routes.registry, "get_rule", fake_get_rule)
+
+    response = client.get("/rules/9999")
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_run_saved_rule_404(monkeypatch) -> None:
+    """POST /rules/{id}/run returns 404 when the rule does not exist."""
+    async def fake_get_rule(rule_id: int) -> SavedRuleResponse | None:
+        return None
+
+    monkeypatch.setattr(routes.registry, "get_rule", fake_get_rule)
+
+    response = client.post("/rules/9999/run")
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_list_results_404_when_rule_missing(monkeypatch) -> None:
+    """GET /rules/{id}/results returns 404 when the parent rule does not exist."""
+    async def fake_get_rule(rule_id: int) -> SavedRuleResponse | None:
+        return None
+
+    monkeypatch.setattr(routes.registry, "get_rule", fake_get_rule)
+
+    response = client.get("/rules/9999/results")
+
+    assert response.status_code == 404
+
+
+def test_create_rule_400_unsafe_sql_delete() -> None:
+    """POST /rules returns 400 when SQL contains a DELETE statement."""
+    response = client.post(
+        "/rules",
+        json={
+            "rule_name": "Dangerous rule",
+            "sql": "DELETE FROM business_data.employees WHERE 1=1;",
+            "expected_result": {"type": "zero_violations"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["type"] == "INVALID_SQL"
+
+
+def test_create_rule_400_unsafe_sql_drop() -> None:
+    """POST /rules returns 400 when SQL contains a DROP statement."""
+    response = client.post(
+        "/rules",
+        json={
+            "rule_name": "Drop rule",
+            "sql": "DROP TABLE business_data.employees;",
+            "expected_result": {"type": "zero_violations"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["type"] == "INVALID_SQL"
+
+
+def test_create_rule_400_invalid_cron_out_of_range() -> None:
+    """POST /rules returns 400 for an invalid cron expression (minute > 59)."""
+    response = client.post(
+        "/rules",
+        json={
+            "rule_name": "Bad cron rule",
+            "sql": "SELECT COUNT(*) AS observed_value FROM business_data.employees;",
+            "expected_result": {"type": "min_threshold", "value": 1},
+            "schedule_cron": "99 * * * *",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["type"] == "INVALID_CRON"
+
+
+# ---------------------------------------------------------------------------
+# HTTP 5xx coverage
+# ---------------------------------------------------------------------------
+
+def test_run_rule_500_on_executor_failure(monkeypatch) -> None:
+    """POST /rules/run returns 500 when the executor raises an unexpected exception."""
+    async def fake_execute_rule(rule) -> None:
+        raise RuntimeError("Database connection lost")
+
+    monkeypatch.setattr(routes.executor, "execute_rule", fake_execute_rule)
+
+    # raise_server_exceptions=False lets us inspect the 500 response instead of re-raising
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.post(
+            "/rules/run",
+            json={
+                "rule_name": "Flaky rule",
+                "sql": "SELECT COUNT(*) AS observed_value FROM business_data.employees;",
+                "expected_result": {"type": "zero_violations"},
+            },
+        )
+
+    assert response.status_code == 500
+
+
+def test_run_saved_rule_500_on_executor_failure(monkeypatch) -> None:
+    """POST /rules/{id}/run returns 500 when the executor raises for a saved rule."""
+    async def fake_get_rule(rule_id: int) -> SavedRuleResponse:
+        return _saved_rule(rule_id)
+
+    async def fake_execute_rule(rule) -> None:
+        raise RuntimeError("Unexpected internal error")
+
+    monkeypatch.setattr(routes.registry, "get_rule", fake_get_rule)
+    monkeypatch.setattr(routes.executor, "execute_rule", fake_execute_rule)
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.post("/rules/1/run")
+
+    assert response.status_code == 500
+
