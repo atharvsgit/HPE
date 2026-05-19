@@ -289,7 +289,7 @@ Results created by the scheduler have the saved rule's `rule_id`.
 
 The database has three schemas:
 
-- `business_data`: sample source tables checked by validation SQL
+- `business_data`: sample company database tables checked by validation SQL
 - `dq_config`: saved rule metadata
 - `dq_results`: persisted execution results
 
@@ -351,6 +351,34 @@ Cardinality:
 
 Only `dq_results.test_results.rule_id -> dq_config.dq_rules.rule_id` is enforced as a real foreign key. The relationships to `business_data` tables are conceptual because rules reference those tables through `sql_text`.
 
+## Failure Notifications
+
+The daemon can send notifications when a rule execution ends with `FAIL` or `ERROR`.
+Passing rules are not notified.
+For count-based failure rules where the executor can derive a row preview, the alert includes a small sample of violating rows in addition to the aggregate result.
+
+Supported channels:
+
+- Slack webhook through `SLACK_WEBHOOK_URL`
+- SMTP email through `SMTP_SERVER`, `SMTP_PORT`, and `ADMIN_EMAIL`
+
+Notification settings are optional. Leave them blank to disable notifications:
+
+```bash
+SLACK_WEBHOOK_URL=
+SMTP_SERVER=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+SMTP_TIMEOUT_SECONDS=5
+NOTIFICATION_HTTP_TIMEOUT_SECONDS=5
+NOTIFICATION_EMAIL_FROM=alerts@dataqualitydaemon.local
+ADMIN_EMAIL=
+```
+
+The API and scheduler containers both receive these settings from Docker Compose.
+
 ## Tests
 
 Run the test suite in Docker:
@@ -359,4 +387,46 @@ Run the test suite in Docker:
 docker compose run --rm --no-deps api pytest
 ```
 
-The tests cover evaluator behavior, SQL safety validation, cron parsing, scheduler classification, scheduled execution dispatch, ad hoc execution behavior, saved-rule endpoint behavior, manual saved-rule execution, and saved-rule result retrieval.
+The tests cover evaluator behavior, SQL safety validation, cron parsing, scheduler classification, scheduled execution dispatch, ad hoc execution behavior, saved-rule endpoint behavior, manual saved-rule execution, saved-rule result retrieval, and failure notification behavior.
+
+## Frontend Application
+
+The merged frontend is a React and TailwindCSS single-page application for the database-backed data quality workflow.
+
+Frontend features:
+
+- PostgreSQL database connection form
+- Table schema display and local connection state management
+- Dynamic rule builder UI
+- Validation history page
+- Dashboard for saved rules, scheduler classifications, and persisted aggregate execution results
+
+Frontend tech stack:
+
+- React
+- Vite
+- TailwindCSS
+- Axios
+
+Run the frontend locally:
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend scripts:
+
+- `npm run dev`: start the local development server
+- `npm run build`: create a production build
+- `npm run preview`: preview the production build locally
+
+Frontend folder structure:
+
+- `src/components/ingestion`: PostgreSQL database form and schema table
+- `src/components/ruleBuilder`: rule authoring and validation results UI
+- `src/components/common`: shared UI utilities such as loaders, toasts, modals, and badges
+- `src/pages`: route-level pages for ingestion, rules, validation history, and dashboard
+- `src/services`: Axios client, endpoint wrappers, and rules API wrappers
+- `src/context`: shared database connection state across connection, rule building, and dashboard views
+- `src/assets`: visual assets for the application shell
