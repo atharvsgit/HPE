@@ -9,8 +9,10 @@ Current scope:
 - Manual execution of saved rules
 - APScheduler-based execution of enabled saved rules with cron schedules
 - Persisted execution results linked back to saved rules
+- Platform Intelligence APIs for profiling, rule suggestions, anomaly detection, drift detection, and full Prefect pipeline orchestration
+- Recurring full-pipeline schedules through a dedicated platform scheduler daemon
 
-Still intentionally out of scope: LLM generation, natural-language parsing, dynamic schedule reload, and UI.
+Still intentionally out of scope: natural-language parsing and UI.
 
 ## Run
 
@@ -30,11 +32,12 @@ The API starts at:
 http://localhost:8000
 ```
 
-`docker compose up --build` starts three services:
+`docker compose up --build` starts four services:
 
 - `postgres`: PostgreSQL test database
 - `api`: FastAPI service
-- `scheduler`: long-running APScheduler daemon
+- `scheduler`: long-running APScheduler daemon for saved validation rules
+- `platform_scheduler`: long-running APScheduler daemon for full Platform Intelligence pipeline schedules
 
 PostgreSQL starts with:
 
@@ -42,7 +45,7 @@ PostgreSQL starts with:
 - superuser: `postgres`
 - execution role for submitted SQL: `dq_executor`
 - metadata role for saved rules/results: `dq_app`
-- schemas: `business_data`, `dq_config`, `dq_results`
+- schemas: `business_data`, `dq_config`, `dq_results`, `dq_platform`
 
 If you already ran an older milestone with a persistent Docker volume, recreate the database once so the new registry schema is initialized:
 
@@ -196,6 +199,68 @@ Default jitter is `120` seconds. Override it for local testing:
 RULE_EXECUTION_JITTER_SECONDS=0 docker compose up --build
 ```
 
+## Platform Intelligence & Workflow System
+
+Manjunath's Platform Intelligence layer is exposed under `/platform` and integrates with Atharv's rule registry/executor.
+
+Pipeline flow:
+
+```text
+profile → validate saved rules → suggest/sanitize rules → detect anomalies → store metadata/events
+```
+
+Core endpoints:
+
+```text
+POST /platform/pipeline/trigger
+GET  /platform/pipeline/runs
+GET  /platform/pipeline/runs/{run_id}
+GET  /platform/pipeline/runs/{run_id}/events
+POST /platform/pipeline/schedules
+GET  /platform/pipeline/schedules
+PATCH /platform/pipeline/schedules/{schedule_id}
+POST /platform/profile
+GET  /platform/profile/{table_name}
+POST /platform/suggestions
+GET  /platform/suggestions
+POST /platform/suggestions/{suggestion_id}/apply
+POST /platform/anomaly/detect
+GET  /platform/anomaly/results
+POST /platform/drift/detect
+GET  /platform/drift/results
+```
+
+The platform layer includes:
+
+- Prefect flow controller with retry policies and dependency graph resolution
+- Persistent execution logging in `dq_platform.pipeline_events`
+- Pipeline schedules in `dq_platform.pipeline_schedules`
+- Polars profiling for schema, nulls, distributions, uniqueness, and statistics
+- Rule suggestions through offline heuristics or Gemini, followed by mandatory sanitization
+- SQLGlot query planning plus Atharv's SQL safety validator before suggested rules are stored
+- Saved-rule validation by calling Atharv's existing executor for rules targeting the table
+- Anomaly detection with Isolation Forest, Z-score, and Local Outlier Factor
+- Evidently-based drift detection endpoints
+
+Create a recurring full-pipeline schedule:
+
+```bash
+curl -X POST http://localhost:8000/platform/pipeline/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "business_data.employees",
+    "schedule_cron": "0 * * * *",
+    "is_enabled": true,
+    "description": "Hourly employee data quality pipeline"
+  }'
+```
+
+Schedule changes are loaded when the `platform_scheduler` container starts. Restart it after adding or changing schedules:
+
+```bash
+docker compose restart platform_scheduler
+```
+
 ## Expected Result Types
 
 ### `zero_violations`
@@ -287,11 +352,12 @@ Results created by the scheduler have the saved rule's `rule_id`.
 
 ## Database Relationships
 
-The database has three schemas:
+The database has four schemas:
 
 - `business_data`: sample source tables checked by validation SQL
 - `dq_config`: saved rule metadata
 - `dq_results`: persisted execution results
+- `dq_platform`: pipeline runs, schedules, events, profiles, suggestions, anomalies, and drift results
 
 ```mermaid
 erDiagram
@@ -359,4 +425,4 @@ Run the test suite in Docker:
 docker compose run --rm --no-deps api pytest
 ```
 
-The tests cover evaluator behavior, SQL safety validation, cron parsing, scheduler classification, scheduled execution dispatch, ad hoc execution behavior, saved-rule endpoint behavior, manual saved-rule execution, and saved-rule result retrieval.
+The tests cover evaluator behavior, SQL safety validation, cron parsing, scheduler classification, scheduled execution dispatch, ad hoc execution behavior, saved-rule endpoint behavior, manual saved-rule execution, saved-rule result retrieval, Platform Intelligence routing, profiling utilities, query planning, rule sanitization, anomaly detection helpers, and orchestration dependency resolution.

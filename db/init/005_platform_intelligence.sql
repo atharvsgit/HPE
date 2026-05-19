@@ -15,12 +15,49 @@ CREATE TABLE IF NOT EXISTS dq_platform.pipeline_runs (
     run_id        BIGSERIAL PRIMARY KEY,
     table_name    TEXT NOT NULL,
     status        TEXT NOT NULL
-                      CHECK (status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED')),
+                      CHECK (status IN ('PENDING', 'RUNNING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED')),
     triggered_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at   TIMESTAMPTZ,
     error         TEXT,
     metadata      JSONB          -- stage timings, task counts, configuration
 );
+
+ALTER TABLE dq_platform.pipeline_runs
+DROP CONSTRAINT IF EXISTS pipeline_runs_status_check;
+
+ALTER TABLE dq_platform.pipeline_runs
+ADD CONSTRAINT pipeline_runs_status_check
+CHECK (status IN ('PENDING', 'RUNNING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED'));
+
+-- ---------------------------------------------------------------------------
+-- pipeline_events: persistent execution logger for each orchestration stage
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dq_platform.pipeline_events (
+    event_id    BIGSERIAL PRIMARY KEY,
+    run_id      BIGINT NOT NULL REFERENCES dq_platform.pipeline_runs(run_id) ON DELETE CASCADE,
+    stage       TEXT NOT NULL,
+    level       TEXT NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR')),
+    message     TEXT NOT NULL,
+    details     JSONB,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_pipeline_events_run ON dq_platform.pipeline_events(run_id, event_id);
+
+-- ---------------------------------------------------------------------------
+-- pipeline_schedules: cron schedules for recurring full-platform pipelines
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dq_platform.pipeline_schedules (
+    schedule_id   BIGSERIAL PRIMARY KEY,
+    table_name    TEXT NOT NULL,
+    schedule_cron TEXT NOT NULL,
+    is_enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+    description   TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_pipeline_schedules_enabled ON dq_platform.pipeline_schedules(is_enabled);
 
 -- ---------------------------------------------------------------------------
 -- dataset_profiles: profiling results produced by the Polars-based engine

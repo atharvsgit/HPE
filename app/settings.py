@@ -30,7 +30,9 @@ class Settings(BaseModel):
     max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "5"))
     pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
-    rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120"))
+    rule_execution_jitter_seconds: int = int(
+        os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120")
+    )
 
     # -------------------------------------------------------------------------
     # Platform Intelligence (Manjunath Patil)
@@ -51,6 +53,11 @@ class Settings(BaseModel):
 
     # Gemini model name (can be overridden for testing with faster/cheaper models)
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    # Jitter for recurring full-pipeline schedules to avoid synchronized load spikes
+    pipeline_execution_jitter_seconds: int = int(
+        os.getenv("PIPELINE_EXECUTION_JITTER_SECONDS", "120")
+    )
 
 
 @lru_cache

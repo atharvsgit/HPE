@@ -3,6 +3,7 @@ app/models/platform_responses.py
 ----------------------------------
 Pydantic v2 response models for all Platform Intelligence API endpoints.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -16,11 +17,38 @@ class PipelineRunResponse(BaseModel):
 
     run_id: int
     table_name: str
-    status: Literal["PENDING", "RUNNING", "SUCCESS", "FAILED"]
+    status: Literal["PENDING", "RUNNING", "SUCCESS", "PARTIAL_SUCCESS", "FAILED"]
     triggered_at: datetime
     finished_at: datetime | None = None
     error: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+class PipelineEventResponse(BaseModel):
+    """Persisted execution log event for one pipeline run."""
+
+    event_id: int
+    run_id: int
+    stage: str
+    level: str
+    message: str
+    details: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class PipelineScheduleResponse(BaseModel):
+    """A recurring platform pipeline schedule."""
+
+    schedule_id: int
+    table_name: str
+    schedule_cron: str
+    is_enabled: bool
+    scheduler_status: Literal[
+        "schedulable", "disabled", "missing_schedule", "invalid_cron"
+    ]
+    description: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class DatasetProfileResponse(BaseModel):
@@ -98,4 +126,6 @@ class PipelineTriggerResponse(BaseModel):
     run_id: int
     table_name: str
     status: Literal["PENDING"]
-    message: str = "Pipeline triggered. Use GET /platform/pipeline/runs/{run_id} to check status."
+    message: str = (
+        "Pipeline triggered. Use GET /platform/pipeline/runs/{run_id} to check status."
+    )

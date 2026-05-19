@@ -12,16 +12,20 @@ Drift is detected using Evidently's:
 
 Both reference and current data are read from PostgreSQL tables.
 """
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import text
 
-from app.db.session import metadata_engine
+from app.platform.data_access import (
+    SourceDataAccessError,
+    fetch_source_mappings,
+    validate_column_names,
+    validate_table_name,
+)
 from app.platform.logger import get_logger
 from app.settings import get_settings
 
@@ -70,14 +74,18 @@ async def detect_drift(
     Raises:
         DriftDetectorError: On query failure, empty data, or invalid inputs.
     """
-    _validate_identifier(reference_table, "reference_table")
-    _validate_identifier(current_table, "current_table")
-    for col in columns:
-        _validate_column_name(col)
+    try:
+        validate_table_name(reference_table)
+        validate_table_name(current_table)
+        validate_column_names(columns)
+    except SourceDataAccessError as exc:
+        raise DriftDetectorError(str(exc)) from exc
 
     log.info(
         "Running drift detection: reference='{ref}', current='{cur}', cols={cols}.",
-        ref=reference_table, cur=current_table, cols=columns,
+        ref=reference_table,
+        cur=current_table,
+        cols=columns,
     )
 
     col_list = ", ".join(columns)
@@ -85,7 +93,9 @@ async def detect_drift(
     cur_df = await _load_table(current_table, col_list)
 
     if ref_df.empty:
-        raise DriftDetectorError(f"Reference table '{reference_table}' returned no rows.")
+        raise DriftDetectorError(
+            f"Reference table '{reference_table}' returned no rows."
+        )
     if cur_df.empty:
         raise DriftDetectorError(f"Current table '{current_table}' returned no rows.")
 
@@ -96,12 +106,19 @@ async def detect_drift(
             f"None of the requested columns {columns} exist in both tables."
         )
 
-    return _run_evidently(reference_table, current_table, common_cols, ref_df[common_cols], cur_df[common_cols])
+    return _run_evidently(
+        reference_table,
+        current_table,
+        common_cols,
+        ref_df[common_cols],
+        cur_df[common_cols],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_evidently(
     reference_table: str,
@@ -112,7 +129,10 @@ def _run_evidently(
 ) -> DriftDetectionResult:
     """Run Evidently report and extract per-column drift results."""
     try:
-        from evidently.metrics import ColumnDriftMetric, DatasetDriftMetric  # type: ignore
+        from evidently.metrics import (  # type: ignore
+            ColumnDriftMetric,
+            DatasetDriftMetric,
+        )
         from evidently.report import Report  # type: ignore
     except ImportError as exc:
         raise DriftDetectorError(
@@ -136,12 +156,14 @@ def _run_evidently(
 
         if "ColumnDriftMetric" in metric_type:
             col_name = value.get("column_name", "unknown")
-            column_results.append(ColumnDriftResult(
-                column_name=col_name,
-                stat_test=value.get("stattest_name", "unknown"),
-                drift_score=float(value.get("drift_score", 0.0)),
-                is_drifted=bool(value.get("drift_detected", False)),
-            ))
+            column_results.append(
+                ColumnDriftResult(
+                    column_name=col_name,
+                    stat_test=value.get("stattest_name", "unknown"),
+                    drift_score=float(value.get("drift_score", 0.0)),
+                    is_drifted=bool(value.get("drift_detected", False)),
+                )
+            )
 
         elif "DatasetDriftMetric" in metric_type:
             dataset_drift = bool(value.get("dataset_drift", False))
@@ -167,24 +189,9 @@ async def _load_table(table_name: str, col_list: str) -> pd.DataFrame:
     """Load selected columns from a PostgreSQL table into a pandas DataFrame."""
     settings = get_settings()
     row_limit = settings.profiling_row_limit
-    sql = f"SELECT {col_list} FROM {table_name} LIMIT {row_limit}"  # noqa: S608
+    sql = f"SELECT {col_list} FROM {table_name} LIMIT :row_limit"  # noqa: S608
     try:
-        async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(sql))
-            rows = result.mappings().all()
+        rows = await fetch_source_mappings(sql, {"row_limit": row_limit})
         return pd.DataFrame([dict(r) for r in rows])
     except Exception as exc:
         raise DriftDetectorError(f"Failed to query '{table_name}': {exc}") from exc
-
-
-def _validate_identifier(name: str, field: str) -> None:
-    pattern = r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$"
-    if not re.match(pattern, name):
-        raise DriftDetectorError(
-            f"Invalid {field} '{name}'. Only alphanumeric identifiers with optional schema prefix allowed."
-        )
-
-
-def _validate_column_name(name: str) -> None:
-    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
-        raise DriftDetectorError(f"Invalid column name '{name}'.")

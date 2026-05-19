@@ -20,6 +20,7 @@ Usage::
     order = graph.resolve()
     # => ["profile", "suggest", "anomaly", "finalize"]  (topological sort)
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -116,22 +117,25 @@ class TaskGraph:
 # Pre-built pipeline graph (the default DQ pipeline)
 # ---------------------------------------------------------------------------
 
+
 def build_default_pipeline_graph() -> TaskGraph:
     """
     Return the default Platform Intelligence pipeline dependency graph.
 
     Stages:
-        profile  → suggest, anomaly
-        suggest  → finalize
-        anomaly  → finalize
-        finalize (terminal)
+        profile    → validate, suggest, anomaly
+        validate   → finalize
+        suggest    → finalize
+        anomaly    → finalize
+        finalize   (terminal)
 
     Returns:
         A :class:`TaskGraph` instance ready for :meth:`TaskGraph.resolve`.
     """
     graph = TaskGraph()
-    graph.add("profile",  depends_on=[])
-    graph.add("suggest",  depends_on=["profile"])
-    graph.add("anomaly",  depends_on=["profile"])
-    graph.add("finalize", depends_on=["suggest", "anomaly"])
+    graph.add("profile", depends_on=[])
+    graph.add("validate", depends_on=["profile"])
+    graph.add("suggest", depends_on=["profile"])
+    graph.add("anomaly", depends_on=["profile"])
+    graph.add("finalize", depends_on=["validate", "suggest", "anomaly"])
     return graph

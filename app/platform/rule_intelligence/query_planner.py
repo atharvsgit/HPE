@@ -11,12 +11,18 @@ Responsibilities:
 This sits between the rule suggestion engines and the executor — every
 suggestion's SQL is run through the planner before being saved as a rule.
 """
+
 from __future__ import annotations
+
+import re
+from typing import Any
 
 import sqlglot
 import sqlglot.errors
 from sqlglot import exp
 
+from app.daemon.sql_safety import SQLSafetyError, validate_safe_select
+from app.platform.data_access import validate_column_name, validate_table_name
 from app.platform.logger import get_logger
 
 log = get_logger(__name__)
@@ -41,7 +47,11 @@ class QueryPlannerError(ValueError):
     """Raised when SQL fails validation or compilation."""
 
 
-def validate_and_optimize(sql: str, dialect: str = "postgres") -> str:
+def validate_and_optimize(
+    sql: str,
+    dialect: str = "postgres",
+    allowed_tables: set[str] | None = None,
+) -> str:
     """
     Parse, validate, and optimize a SQL string using SQLGlot.
 
@@ -62,6 +72,11 @@ def validate_and_optimize(sql: str, dialect: str = "postgres") -> str:
         QueryPlannerError: On parse failures or contract violations.
     """
     try:
+        validate_safe_select(sql)
+    except SQLSafetyError as exc:
+        raise QueryPlannerError(str(exc)) from exc
+
+    try:
         statements = sqlglot.parse(sql, dialect=dialect)
     except sqlglot.errors.ParseError as exc:
         raise QueryPlannerError(f"SQL parse error: {exc}") from exc
@@ -76,8 +91,10 @@ def validate_and_optimize(sql: str, dialect: str = "postgres") -> str:
     if not isinstance(stmt, exp.Select):
         raise QueryPlannerError("Only SELECT statements are allowed.")
 
-    # Validate output column contract
+    # Validate output column contract and optional table allowlist.
     _assert_valid_output_column(stmt)
+    if allowed_tables is not None:
+        _assert_allowed_tables(stmt, allowed_tables)
 
     # Transpile to canonical PostgreSQL form
     optimized_sql: str = stmt.sql(dialect=dialect, pretty=True)
@@ -85,7 +102,7 @@ def validate_and_optimize(sql: str, dialect: str = "postgres") -> str:
     return optimized_sql
 
 
-def compile_rule_to_sql(rule_config: dict) -> str:
+def compile_rule_to_sql(rule_config: dict[str, Any]) -> str:
     """
     Compile a high-level rule config dict into a PostgreSQL SELECT string.
 
@@ -120,16 +137,29 @@ def compile_rule_to_sql(rule_config: dict) -> str:
         )
     if not table:
         raise QueryPlannerError("rule_config must include a non-empty 'table' field.")
+    try:
+        validate_table_name(table)
+    except Exception as exc:
+        raise QueryPlannerError(str(exc)) from exc
 
     # Fix (Copilot): validate column is present for all column-level rule types
     _COLUMN_REQUIRED_TYPES = {
-        "null_check", "not_null_required", "uniqueness_check",
-        "min_value", "max_value", "range_check",
+        "null_check",
+        "not_null_required",
+        "uniqueness_check",
+        "min_value",
+        "max_value",
+        "range_check",
     }
     if rule_type in _COLUMN_REQUIRED_TYPES and not column:
         raise QueryPlannerError(
             f"rule_type '{rule_type}' requires a non-empty 'column' field."
         )
+    if column:
+        try:
+            validate_column_name(column)
+        except Exception as exc:
+            raise QueryPlannerError(str(exc)) from exc
 
     sql = _build_sql(rule_type, table, column, rule_config)
     log.debug("Compiled rule_type='{t}' to SQL.", t=rule_type)
@@ -139,6 +169,7 @@ def compile_rule_to_sql(rule_config: dict) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _assert_valid_output_column(stmt: exp.Select) -> None:
     """
@@ -168,7 +199,71 @@ def _assert_valid_output_column(stmt: exp.Select) -> None:
         )
 
 
-def _build_sql(rule_type: str, table: str, column: str, cfg: dict) -> str:
+def extract_table_names(sql: str, dialect: str = "postgres") -> set[str]:
+    """Return table names referenced by a single safe SELECT statement."""
+    try:
+        validate_safe_select(sql)
+        statements = sqlglot.parse(sql, dialect=dialect)
+    except (SQLSafetyError, sqlglot.errors.ParseError) as exc:
+        raise QueryPlannerError(str(exc)) from exc
+    if (
+        not statements
+        or len(statements) != 1
+        or not isinstance(statements[0], exp.Select)
+    ):
+        raise QueryPlannerError("Only a single SELECT statement is allowed.")
+    return _referenced_tables(statements[0])
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _assert_allowed_tables(stmt: exp.Select, allowed_tables: set[str]) -> None:
+    referenced = _referenced_tables(stmt)
+    if not referenced:
+        raise QueryPlannerError("SQL must reference the target dataset table.")
+
+    allowed = _normalized_table_names(allowed_tables)
+    disallowed = sorted(
+        t for t in referenced if _normalize_table_name(t) not in allowed
+    )
+    if disallowed:
+        raise QueryPlannerError(
+            f"SQL references table(s) outside the allowed set: {disallowed}."
+        )
+
+
+def _referenced_tables(stmt: exp.Select) -> set[str]:
+    tables: set[str] = set()
+    for table in stmt.find_all(exp.Table):
+        parts: list[str] = []
+        db = table.args.get("db")
+        if db is not None:
+            parts.append(str(db).strip('"'))
+        name = table.name
+        if name:
+            parts.append(name.strip('"'))
+        if parts:
+            tables.add(".".join(parts))
+    return tables
+
+
+def _normalized_table_names(table_names: set[str]) -> set[str]:
+    normalized: set[str] = set()
+    for table_name in table_names:
+        normalized.add(_normalize_table_name(table_name))
+        if "." in table_name:
+            normalized.add(_normalize_table_name(table_name.split(".")[-1]))
+    return normalized
+
+
+def _normalize_table_name(table_name: str) -> str:
+    return re.sub(r'"', "", table_name).lower()
+
+
+def _build_sql(rule_type: str, table: str, column: str, cfg: dict[str, Any]) -> str:
     """Build a SQL string for the given rule type."""
     match rule_type:
         case "null_check" | "not_null_required":
@@ -210,7 +305,7 @@ def _build_sql(rule_type: str, table: str, column: str, cfg: dict) -> str:
             raise QueryPlannerError(f"Unhandled rule_type: '{rule_type}'")
 
 
-def _require_param(cfg: dict, key: str):
+def _require_param(cfg: dict[str, Any], key: str) -> Any:
     if key not in cfg or cfg[key] is None:
         raise QueryPlannerError(f"rule_config is missing required parameter '{key}'.")
     return cfg[key]

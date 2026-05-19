@@ -5,17 +5,18 @@ Tests for the Prefect orchestration flow controller.
 Uses Prefect's `.fn()` pattern to run flows/tasks as plain Python
 functions without requiring a Prefect server.
 """
+
 import pytest
 
-from app.platform.orchestration.flow_controller import run_full_pipeline
 from app.platform.orchestration.dependency_manager import (
+    CyclicDependencyError,
     TaskGraph,
     build_default_pipeline_graph,
-    CyclicDependencyError,
 )
+from app.platform.orchestration.flow_controller import run_full_pipeline
 from app.platform.orchestration.retry_handler import (
-    DEFAULT_POLICY,
     CRITICAL_POLICY,
+    DEFAULT_POLICY,
     EXTERNAL_API_POLICY,
     NO_RETRY_POLICY,
     retry_kwargs,
@@ -47,8 +48,9 @@ class TestDependencyManager:
     def test_default_pipeline_graph_resolves(self):
         graph = build_default_pipeline_graph()
         order = graph.resolve()
-        assert len(order) == 4
+        assert len(order) == 5
         assert order[0] == "profile"
+        assert "validate" in order
         assert order[-1] == "finalize"
 
     def test_profile_before_suggest(self):
@@ -61,9 +63,10 @@ class TestDependencyManager:
         order = graph.resolve()
         assert order.index("profile") < order.index("anomaly")
 
-    def test_suggest_and_anomaly_before_finalize(self):
+    def test_parallel_stages_before_finalize(self):
         graph = build_default_pipeline_graph()
         order = graph.resolve()
+        assert order.index("validate") < order.index("finalize")
         assert order.index("suggest") < order.index("finalize")
         assert order.index("anomaly") < order.index("finalize")
 
@@ -88,10 +91,10 @@ class TestDependencyManager:
 
     def test_custom_pipeline_order(self):
         graph = TaskGraph()
-        graph.add("ingest",    depends_on=[])
-        graph.add("profile",   depends_on=["ingest"])
-        graph.add("validate",  depends_on=["profile"])
-        graph.add("report",    depends_on=["validate"])
+        graph.add("ingest", depends_on=[])
+        graph.add("profile", depends_on=["ingest"])
+        graph.add("validate", depends_on=["profile"])
+        graph.add("report", depends_on=["validate"])
         order = graph.resolve()
         assert order == ["ingest", "profile", "validate", "report"]
 

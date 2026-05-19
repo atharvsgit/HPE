@@ -5,6 +5,7 @@ Integration tests for Platform Intelligence API endpoints.
 Uses FastAPI's TestClient with mocked DB and platform functions
 so no real PostgreSQL connection is required.
 """
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,6 +23,7 @@ def client() -> TestClient:
 # Health check (smoke test that app starts with platform routes)
 # =============================================================================
 
+
 class TestHealthEndpoint:
     def test_health_returns_ok(self, client):
         response = client.get("/health")
@@ -32,6 +34,7 @@ class TestHealthEndpoint:
 # =============================================================================
 # Platform route availability (ensure routes are registered)
 # =============================================================================
+
 
 class TestPlatformRoutesRegistered:
     def test_openapi_includes_platform_pipeline(self, client):
@@ -44,6 +47,16 @@ class TestPlatformRoutesRegistered:
         response = client.get("/openapi.json")
         paths = response.json()["paths"]
         assert "/platform/profile" in paths
+
+    def test_openapi_includes_pipeline_events(self, client):
+        response = client.get("/openapi.json")
+        paths = response.json()["paths"]
+        assert "/platform/pipeline/runs/{run_id}/events" in paths
+
+    def test_openapi_includes_pipeline_schedules(self, client):
+        response = client.get("/openapi.json")
+        paths = response.json()["paths"]
+        assert "/platform/pipeline/schedules" in paths
 
     def test_openapi_includes_platform_suggestions(self, client):
         response = client.get("/openapi.json")
@@ -64,6 +77,7 @@ class TestPlatformRoutesRegistered:
 # =============================================================================
 # Request model validation
 # =============================================================================
+
 
 class TestPlatformRequestValidation:
     def test_trigger_pipeline_rejects_empty_table_name(self, client):

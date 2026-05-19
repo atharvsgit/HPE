@@ -7,12 +7,16 @@ Queries a PostgreSQL table via SQLAlchemy, loads the data into a Polars
 DataFrame (up to the configured row limit), then runs the full suite of
 sub-analyzers to produce a unified profile.
 """
+
 from __future__ import annotations
 
 import polars as pl
-from sqlalchemy import text
 
-from app.db.session import metadata_engine
+from app.platform.data_access import (
+    SourceDataAccessError,
+    fetch_source_mappings,
+    validate_table_name,
+)
 from app.platform.logger import get_logger
 from app.platform.profiling.statistics_generator import generate_statistics
 from app.settings import get_settings
@@ -44,25 +48,27 @@ async def profile_table(table_name: str, row_limit: int | None = None) -> dict:
         ProfilerError: If the table cannot be queried or is completely empty.
     """
     settings = get_settings()
-    effective_limit = row_limit if (row_limit is not None and row_limit > 0) else settings.profiling_row_limit
-    log.info("Starting profile for '{t}' (limit={lim})", t=table_name, lim=effective_limit)
+    effective_limit = (
+        row_limit
+        if (row_limit is not None and row_limit > 0)
+        else settings.profiling_row_limit
+    )
+    log.info(
+        "Starting profile for '{t}' (limit={lim})", t=table_name, lim=effective_limit
+    )
 
     # ------------------------------------------------------------------
-    # Validate table name to prevent SQL injection.
-    # We only allow schema.table or bare table identifiers.
+    # Validate table name to prevent SQL injection. Source rows are read
+    # through dq_executor, while profile metadata is written through dq_app.
     # ------------------------------------------------------------------
-    _validate_table_name(table_name)
-
-    query = f"SELECT * FROM {table_name} LIMIT {effective_limit}"  # noqa: S608
-
     try:
-        async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(query))
-            rows = result.mappings().all()
+        validate_table_name(table_name)
+        query = f"SELECT * FROM {table_name} LIMIT :row_limit"  # noqa: S608
+        rows = await fetch_source_mappings(query, {"row_limit": effective_limit})
+    except SourceDataAccessError as exc:
+        raise ProfilerError(str(exc)) from exc
     except Exception as exc:
-        raise ProfilerError(
-            f"Failed to query table '{table_name}': {exc}"
-        ) from exc
+        raise ProfilerError(f"Failed to query table '{table_name}': {exc}") from exc
 
     if not rows:
         raise ProfilerError(f"Table '{table_name}' returned no rows.")
@@ -72,22 +78,3 @@ async def profile_table(table_name: str, row_limit: int | None = None) -> dict:
     log.info("Loaded {n} rows from '{t}'.", n=len(rows), t=table_name)
 
     return generate_statistics(df, table_name)
-
-
-def _validate_table_name(table_name: str) -> None:
-    """
-    Ensure the table name only contains alphanumeric characters, underscores,
-    and at most one dot (schema separator).
-
-    Raises:
-        ProfilerError: On invalid identifier.
-    """
-    import re
-
-    pattern = r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$"
-    if not re.match(pattern, table_name):
-        raise ProfilerError(
-            f"Invalid table name '{table_name}'. "
-            "Only alphanumeric characters, underscores, and one optional "
-            "schema separator (.) are allowed."
-        )

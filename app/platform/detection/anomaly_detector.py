@@ -10,6 +10,7 @@ Anomaly detection engine supporting three methods:
 All methods operate on a single numeric column extracted from a PostgreSQL
 table and return a standardised :class:`AnomalyDetectionResult`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,9 +18,13 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
 
-from app.db.session import metadata_engine
+from app.platform.data_access import (
+    SourceDataAccessError,
+    fetch_source_rows,
+    validate_column_name,
+    validate_table_name,
+)
 from app.platform.logger import get_logger
 from app.settings import get_settings
 
@@ -65,10 +70,16 @@ async def detect_anomalies(
     """
     settings = get_settings()
     contamination = settings.anomaly_contamination
+    if not 0 < contamination <= 0.5:
+        raise AnomalyDetectorError(
+            "ANOMALY_CONTAMINATION must be greater than 0 and less than or equal to 0.5."
+        )
 
     log.info(
         "Running anomaly detection on '{t}.{c}' with method='{m}'.",
-        t=table_name, c=column_name, m=method,
+        t=table_name,
+        c=column_name,
+        m=method,
     )
 
     data = await _load_column(table_name, column_name)
@@ -78,7 +89,13 @@ async def detect_anomalies(
             f"Column '{column_name}' in '{table_name}' returned no data."
         )
 
-    values = data.dropna().values.astype(float)
+    try:
+        values = data.dropna().values.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise AnomalyDetectorError(
+            f"Column '{column_name}' in '{table_name}' is not numeric enough for anomaly detection."
+        ) from exc
+
     if len(values) < 10:
         raise AnomalyDetectorError(
             f"Not enough non-null rows to run anomaly detection (need ≥ 10, got {len(values)})."
@@ -98,11 +115,15 @@ async def detect_anomalies(
     anomaly_values = values[anomaly_mask].tolist()
     anomaly_count = int(anomaly_mask.sum())
     total_rows = len(values)
-    anomaly_pct = round((anomaly_count / total_rows) * 100, 4) if total_rows > 0 else 0.0
+    anomaly_pct = (
+        round((anomaly_count / total_rows) * 100, 4) if total_rows > 0 else 0.0
+    )
 
     log.info(
         "Anomaly detection complete: {cnt}/{total} anomalies ({pct}%).",
-        cnt=anomaly_count, total=total_rows, pct=anomaly_pct,
+        cnt=anomaly_count,
+        total=total_rows,
+        pct=anomaly_pct,
     )
 
     return AnomalyDetectionResult(
@@ -112,7 +133,7 @@ async def detect_anomalies(
         anomaly_count=anomaly_count,
         total_rows=total_rows,
         anomaly_pct=anomaly_pct,
-        anomalous_values=anomaly_values[:50],   # cap sample size for storage
+        anomalous_values=anomaly_values[:50],  # cap sample size for storage
         anomalous_indices=anomaly_indices[:50],
     )
 
@@ -120,6 +141,7 @@ async def detect_anomalies(
 # ---------------------------------------------------------------------------
 # Detection method implementations
 # ---------------------------------------------------------------------------
+
 
 def _isolation_forest(values: np.ndarray, contamination: float) -> np.ndarray:
     from sklearn.ensemble import IsolationForest  # type: ignore[import-untyped]
@@ -152,27 +174,21 @@ def _lof(values: np.ndarray, contamination: float) -> np.ndarray:
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 async def _load_column(table_name: str, column_name: str) -> pd.Series:
     """Load a single numeric column from PostgreSQL into a pandas Series."""
-    # Basic identifier safety (no injection via column name)
-    import re
-    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", column_name):
-        raise AnomalyDetectorError(
-            f"Invalid column name '{column_name}'."
-        )
-    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$", table_name):
-        raise AnomalyDetectorError(
-            f"Invalid table name '{table_name}'."
-        )
+    try:
+        validate_table_name(table_name)
+        validate_column_name(column_name)
+    except SourceDataAccessError as exc:
+        raise AnomalyDetectorError(str(exc)) from exc
 
-    # Fix (Copilot): apply row limit to prevent OOM on large tables
+    # Apply row limit to prevent OOM on large tables.
     settings = get_settings()
     row_limit = settings.profiling_row_limit
     sql = f"SELECT {column_name} FROM {table_name} LIMIT :row_limit"  # noqa: S608
     try:
-        async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(sql), {"row_limit": row_limit})
-            rows = result.fetchall()
+        rows = await fetch_source_rows(sql, {"row_limit": row_limit})
     except Exception as exc:
         raise AnomalyDetectorError(
             f"Failed to query '{table_name}.{column_name}': {exc}"
