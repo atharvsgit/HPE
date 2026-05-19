@@ -1,5 +1,5 @@
 -- =============================================================================
--- 005_platform_intelligence.sql
+-- 006_platform_intelligence.sql
 -- Platform Intelligence schema: pipeline runs, profiling, rule suggestions,
 -- anomaly detection, and data drift tracking.
 -- Author: Manjunath Patil (Platform Intelligence & Workflow System)
