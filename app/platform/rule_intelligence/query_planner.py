@@ -74,7 +74,10 @@ def validate_and_optimize(
     try:
         validate_safe_select(sql)
     except SQLSafetyError as exc:
-        raise QueryPlannerError(str(exc)) from exc
+        message = str(exc)
+        if "one SQL statement" in message:
+            message = "Only a single SQL statement is allowed."
+        raise QueryPlannerError(message) from exc
 
     try:
         statements = sqlglot.parse(sql, dialect=dialect)
