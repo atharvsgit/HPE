@@ -3,9 +3,9 @@ app/platform/detection/anomaly_detector.py
 --------------------------------------------
 Anomaly detection engine supporting three methods:
 
-  - ``isolation_forest``: Isolation Forest (sklearn 1.8.0)
-  - ``zscore``          : Z-score threshold (scipy)
-  - ``lof``             : Local Outlier Factor (sklearn 1.8.0)
+  - ``isolation_forest``: lightweight median-distance tail scoring
+  - ``zscore``          : NumPy-based z-score threshold
+  - ``lof``             : lightweight median-distance tail scoring
 
 All methods operate on a single numeric column extracted from a PostgreSQL
 table and return a standardised :class:`AnomalyDetectionResult`.

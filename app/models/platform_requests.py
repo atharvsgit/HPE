@@ -75,9 +75,8 @@ class AnomalyDetectionRequest(BaseModel):
         default="isolation_forest",
         description=(
             "Detection algorithm: "
-            "'isolation_forest' (sklearn IsolationForest), "
-            "'zscore' (scipy z-score threshold), "
-            "'lof' (sklearn LocalOutlierFactor)."
+            "'isolation_forest' and 'lof' use lightweight tail-distance scoring, "
+            "'zscore' uses a NumPy z-score threshold."
         ),
     )
 

@@ -1,14 +1,14 @@
 """
 app/platform/detection/drift_detector.py
 ------------------------------------------
-Data drift detection engine using Evidently AI (v0.7.21).
+Lightweight data drift detection engine.
 
 Compares a reference dataset against a current dataset on one or more
 columns and returns per-column drift scores and a dataset-level summary.
 
-Drift is detected using Evidently's:
-  - ``ColumnDriftMetric``  : per-column statistical drift test
-  - ``DatasetDriftMetric`` : overall dataset drift flag
+Drift is detected using a simple mean-shift score for numeric columns. This
+keeps the prototype Docker image small while preserving the API and persistence
+contract for a future Evidently-backed implementation.
 
 Both reference and current data are read from PostgreSQL tables.
 """
@@ -96,14 +96,20 @@ async def detect_drift(
             f"None of the requested columns {columns} exist in both tables."
         )
 
-    return _run_evidently(reference_table, current_table, common_cols, ref_df[common_cols], cur_df[common_cols])
+    return _run_drift_detection(
+        reference_table,
+        current_table,
+        common_cols,
+        ref_df[common_cols],
+        cur_df[common_cols],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _run_evidently(
+def _run_drift_detection(
     reference_table: str,
     current_table: str,
     columns: list[str],
@@ -153,14 +159,25 @@ def _run_evidently(
     )
 
 
+def _run_evidently(
+    reference_table: str,
+    current_table: str,
+    columns: list[str],
+    ref_df: pd.DataFrame,
+    cur_df: pd.DataFrame,
+) -> DriftDetectionResult:
+    """Backward-compatible alias for tests and callers from the original branch."""
+    return _run_drift_detection(reference_table, current_table, columns, ref_df, cur_df)
+
+
 async def _load_table(table_name: str, col_list: str) -> pd.DataFrame:
     """Load selected columns from a PostgreSQL table into a pandas DataFrame."""
     settings = get_settings()
     row_limit = settings.profiling_row_limit
-    sql = f"SELECT {col_list} FROM {table_name} LIMIT {row_limit}"  # noqa: S608
+    sql = f"SELECT {col_list} FROM {table_name} LIMIT :row_limit"  # noqa: S608
     try:
         async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(sql))
+            result = await conn.execute(text(sql), {"row_limit": row_limit})
             rows = result.mappings().all()
         return pd.DataFrame([dict(r) for r in rows])
     except Exception as exc:

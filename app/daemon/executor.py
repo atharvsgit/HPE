@@ -114,7 +114,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
         observed_value = _numeric_value(raw_value)
         status = evaluate_observed_value(observed_value, rule.expected_result)
 
-        if observed_key == "violation_count" and observed_value > 0:
+        if observed_key == "violation_count" and observed_value > 0 and status == "FAIL":
             violation_rows = await _fetch_violation_preview(sql_body)
 
         result = RuleExecutionResult(
