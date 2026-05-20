@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS dq_config.llm_rule_drafts (
+    draft_id BIGSERIAL PRIMARY KEY,
+    source_prompt TEXT NOT NULL,
+    rule_name TEXT,
+    sql_text TEXT,
+    expected_result_type TEXT,
+    expected_result_value NUMERIC NULL,
+    schedule_cron TEXT NULL,
+    validation_status TEXT NOT NULL,
+    validation_errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    dry_run_status TEXT NULL,
+    dry_run_observed_key TEXT NULL,
+    dry_run_observed_value NUMERIC NULL,
+    dry_run_error_message TEXT NULL,
+    reviewer_status TEXT NOT NULL DEFAULT 'pending_review',
+    reviewer_notes TEXT NULL,
+    approved_rule_id BIGINT NULL REFERENCES dq_config.dq_rules(rule_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

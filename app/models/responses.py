@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ class RuleExecutionResult(BaseModel):
     rule_name: str
     status: Literal["PASS", "FAIL", "ERROR"]
     result: dict[str, int | float] | None
+    violation_rows: list[dict[str, Any]] = []
     expected_result: ExpectedResult
     execution_time_ms: int
     executed_at: datetime
@@ -37,6 +39,7 @@ class SavedRuleExecutionResultResponse(BaseModel):
     result_id: int
     rule_id: int | None
     rule_name: str
+    sql: str
     status: Literal["PASS", "FAIL", "ERROR"]
     observed_key: str | None
     observed_value: int | float | None
@@ -56,3 +59,10 @@ class SchedulerRuleStatusResponse(BaseModel):
         "missing_schedule",
         "invalid_cron",
     ]
+
+
+class DatabaseConnectionResponse(BaseModel):
+    dataset: dict[str, Any]
+    schema: list[dict[str, Any]]
+    rows: list[dict[str, Any]] = []
+    message: str
