@@ -50,9 +50,9 @@ class Settings(BaseModel):
     )
     notification_email_from: str = os.getenv(
         "NOTIFICATION_EMAIL_FROM",
-        "alerts@dataqualitydaemon.local",
+        "manjunathpatil3155@gmail.com",
     )
-    admin_email: str | None = os.getenv("ADMIN_EMAIL")
+    admin_email: str | None = os.getenv("ADMIN_EMAIL", "manjunathpatil3155@gmail.com")
 
     # -------------------------------------------------------------------------
     # Platform Intelligence (Manjunath Patil)

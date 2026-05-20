@@ -10,7 +10,8 @@ This is the "brain" of the Platform Intelligence layer. It chains together:
     4. Persist results     (PostgreSQL via SQLAlchemy)
 
 Design choices:
-  - PREFECT_SERVER_EPHEMERAL_ENABLED=false so no local Prefect server is started.
+  - PREFECT_SERVER_ALLOW_EPHEMERAL_MODE=true lets local Docker demos run without
+    a configured Prefect API server.
   - Tasks use async functions compatible with FastAPI's event loop.
   - The flow is triggered via the REST API; it runs in a background asyncio task.
   - Prefect's @flow and @task decorators provide retry logic, structured logging,
