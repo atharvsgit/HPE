@@ -39,6 +39,31 @@ async def test_trigger_validation_success():
 
 
 @pytest.mark.asyncio
+async def test_trigger_validation_includes_optional_table_name():
+    """The client can pass a PostgreSQL table mapping for DB-backed validation."""
+    service = ValidationTriggerService(base_url="http://fake-api")
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mocked_post:
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"status": "TRIGGERED", "run_id": 99}
+        mocked_post.return_value = mock_response
+
+        result = await service.trigger_validation(
+            dataset_name="employees_upload",
+            batch_id="b_456",
+            parquet_path="/path/to.parquet",
+            profile_path="/path/to/profile.json",
+            table_name="business_data.employees",
+        )
+
+        assert result["status"] == "TRIGGERED"
+        args, kwargs = mocked_post.call_args
+        assert args == ("http://fake-api/api/v1/validation/trigger",)
+        assert kwargs["json"]["table_name"] == "business_data.employees"
+
+
+@pytest.mark.asyncio
 async def test_trigger_validation_retry_and_fail():
     """Test exponential backoff retries exhausted scenarios."""
     # Fast retries for testing

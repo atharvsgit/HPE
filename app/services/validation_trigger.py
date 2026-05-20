@@ -56,7 +56,8 @@ class ValidationTriggerService:
         dataset_name: str,
         batch_id: str,
         parquet_path: str,
-        profile_path: str
+        profile_path: str,
+        table_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Asynchronously triggers the validation process by calling the API endpoint.
@@ -67,6 +68,9 @@ class ValidationTriggerService:
             batch_id (str): Generated UUID/String for the ingestion batch.
             parquet_path (str): URI/Path to the successfully written Parquet partition.
             profile_path (str): URI/Path to the generated dataset profile metadata.
+            table_name (Optional[str]): PostgreSQL table to run the Platform Intelligence
+                pipeline against. If omitted, the validation API acknowledges the batch
+                without starting a DB-backed run.
 
         Returns:
             Dict[str, Any]: The response payload from the validation API.
@@ -82,6 +86,8 @@ class ValidationTriggerService:
             "parquet_path": parquet_path,
             "profile_path": profile_path
         }
+        if table_name is not None:
+            payload["table_name"] = table_name
 
         logger.info(
             f"Preparing to trigger validation for dataset='{dataset_name}', batch_id='{batch_id}'"
@@ -139,7 +145,8 @@ async def notify_validation_engine(
     batch_id: str,
     parquet_path: str,
     profile_path: str,
-    base_url: Optional[str] = None
+    base_url: Optional[str] = None,
+    table_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Utility wrapper to instantly trigger the validation engine asynchronously.
@@ -149,5 +156,6 @@ async def notify_validation_engine(
         dataset_name=dataset_name,
         batch_id=batch_id,
         parquet_path=parquet_path,
-        profile_path=profile_path
+        profile_path=profile_path,
+        table_name=table_name,
     )

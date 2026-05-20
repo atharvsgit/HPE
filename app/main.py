@@ -10,6 +10,7 @@ from app.api.ingestion_routes import router as ingestion_router
 from app.api.llm_routes import router as llm_router
 from app.api.platform_routes import platform_router
 from app.api.routes import router
+from app.api.validation_routes import router as validation_router
 from app.db.session import close_db_engine
 
 
@@ -47,6 +48,7 @@ app.include_router(router)
 app.include_router(ingestion_router)
 app.include_router(llm_router)
 app.include_router(platform_router)
+app.include_router(validation_router)
 
 
 @app.get("/docs", include_in_schema=False)
