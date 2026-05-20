@@ -292,7 +292,7 @@ async def profile_dataset(request: ProfileRequest) -> DatasetProfileResponse:
                 "schema_info": json.dumps(profile["schema_info"]),
                 "statistics": json.dumps(profile["statistics"], default=str),
                 "uniqueness": json.dumps(profile["uniqueness"], default=str),
-                "profiled_at": profile["profiled_at"],
+                "profiled_at": _profiled_at_value(profile.get("profiled_at")),
             },
         )
         row = result.mappings().one()
@@ -890,3 +890,11 @@ def _anomaly_from_row(row) -> AnomalyResultResponse:
         details=_parse_json_optional(row.get("details")),
         detected_at=row["detected_at"],
     )
+
+
+def _profiled_at_value(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return datetime.now(UTC)

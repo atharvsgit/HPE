@@ -40,7 +40,6 @@ class Settings(BaseModel):
     )
 
     # Notifications (Parnika)
-    slack_webhook_url: str | None = os.getenv("SLACK_WEBHOOK_URL")
     smtp_server: str | None = os.getenv("SMTP_SERVER")
     smtp_port: int | None = _optional_int("SMTP_PORT", 587)
     smtp_username: str | None = os.getenv("SMTP_USERNAME")
@@ -51,14 +50,14 @@ class Settings(BaseModel):
         "yes",
     }
     smtp_timeout_seconds: float = float(os.getenv("SMTP_TIMEOUT_SECONDS", "5"))
-    notification_http_timeout_seconds: float = float(
-        os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "5")
-    )
     notification_email_from: str = os.getenv(
         "NOTIFICATION_EMAIL_FROM",
         "alerts@dataqualitydaemon.local",
     )
-    admin_email: str | None = os.getenv("ADMIN_EMAIL")
+    admin_email: str | None = os.getenv(
+        "ADMIN_EMAIL",
+        "manjunathpatil3155@gmail.com",
+    )
 
     # LLM-assisted rule drafts
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock")

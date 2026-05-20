@@ -39,7 +39,7 @@ def generate_statistics(df: pl.DataFrame, table_name: str) -> dict:
             "schema_info": {"salary": "float", "department": "string", ...},
             "statistics": {"salary": {"min": 0, "max": 250000, ...}, ...},
             "uniqueness": {"employee_id": {"unique_pct": 100.0, "is_unique": true}, ...},
-            "profiled_at": "2026-05-16T16:00:00.000000+00:00"
+            "profiled_at": datetime(2026, 5, 16, 16, 0, tzinfo=UTC)
         }
     """
     log.info("Generating full statistics profile for table '{t}'.", t=table_name)
@@ -57,7 +57,7 @@ def generate_statistics(df: pl.DataFrame, table_name: str) -> dict:
         "schema_info": schema_info,
         "statistics": statistics,
         "uniqueness": uniqueness,
-        "profiled_at": datetime.now(UTC).isoformat(),
+        "profiled_at": datetime.now(UTC),
     }
 
     log.info(

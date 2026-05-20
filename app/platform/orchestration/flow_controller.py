@@ -11,7 +11,8 @@ This is the "brain" of the Platform Intelligence layer. It chains together:
     5. Storage/logging     (PostgreSQL pipeline metadata and events)
 
 Design choices:
-  - PREFECT_SERVER_EPHEMERAL_ENABLED=false so no local Prefect server is started.
+  - PREFECT_SERVER_ALLOW_EPHEMERAL_MODE=true lets local/Docker runs execute
+    without a separately managed Prefect server.
   - Tasks use async functions compatible with FastAPI's event loop.
   - The flow is triggered via the REST API or the platform task scheduler.
   - Prefect's @flow and @task decorators provide retry logic, structured logging,
@@ -97,9 +98,7 @@ async def persist_profile_task(
                 "schema_info": _to_json(profile.get("schema_info", {})),
                 "statistics": _to_json(profile.get("statistics", {})),
                 "uniqueness": _to_json(profile.get("uniqueness", {})),
-                "profiled_at": profile.get(
-                    "profiled_at", datetime.now(UTC).isoformat()
-                ),
+                "profiled_at": _profiled_at_value(profile.get("profiled_at")),
             },
         )
         row = result.mappings().one()
@@ -576,3 +575,11 @@ def _unwrap_stage_result(
 
 def _to_json(obj: Any) -> str:
     return json.dumps(obj, default=str)
+
+
+def _profiled_at_value(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return datetime.now(UTC)

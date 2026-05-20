@@ -6,14 +6,11 @@ import logging
 import smtplib
 from email.message import EmailMessage
 
-import httpx
-
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import RuleExecutionResult
 from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
-logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
@@ -42,37 +39,6 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
     lines.append(f"Executed at: {result.executed_at.isoformat()}")
 
     return "\n".join(lines)
-
-
-async def _send_slack_notification(
-    rule: RuleExecutionRequest,
-    result: RuleExecutionResult,
-    webhook_url: str,
-    timeout_seconds: float,
-) -> None:
-    try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            response = await client.post(
-                webhook_url,
-                json={"text": _notification_text(rule, result)},
-            )
-            response.raise_for_status()
-        logger.info("Sent data quality alert to Slack for rule %s.", rule.rule_name)
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Failed to send Slack data quality alert: HTTP %s",
-            exc.response.status_code,
-        )
-    except httpx.HTTPError as exc:
-        logger.error(
-            "Failed to send Slack data quality alert: %s",
-            type(exc).__name__,
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to send Slack data quality alert: %s",
-            type(exc).__name__,
-        )
 
 
 def _send_email_notification_sync(
@@ -128,22 +94,12 @@ async def notify_admin_of_failure(
     settings = get_settings()
     tasks = []
 
-    if settings.slack_webhook_url:
-        tasks.append(
-            _send_slack_notification(
-                rule,
-                result,
-                settings.slack_webhook_url,
-                settings.notification_http_timeout_seconds,
-            )
-        )
-
     if settings.smtp_server:
         tasks.append(_send_email_notification(rule, result, settings))
 
     if not tasks:
         logger.warning(
-            "Rule %s ended with %s, but no notification channels are configured.",
+            "Rule %s ended with %s, but email notifications are not configured.",
             rule.rule_name,
             result.status,
         )
