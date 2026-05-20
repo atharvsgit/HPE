@@ -69,7 +69,7 @@ const getWorkspaceStatus = ({ selectedDataset, validationResults, resultRows }) 
 
 function MetricTile({ label, value, hint }) {
   return (
-    <div className="metric-card min-w-0">
+    <div className="metric-card relative min-w-0">
       <div className="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/50 to-transparent" />
       <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
       <p className="mt-3 max-w-full break-all text-2xl font-bold leading-8 text-white">{value}</p>

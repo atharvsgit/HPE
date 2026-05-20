@@ -53,11 +53,11 @@ async def profile_table(table_name: str, row_limit: int | None = None) -> dict:
     # ------------------------------------------------------------------
     _validate_table_name(table_name)
 
-    query = f"SELECT * FROM {table_name} LIMIT {effective_limit}"  # noqa: S608
+    query = f"SELECT * FROM {table_name} LIMIT :row_limit"  # noqa: S608
 
     try:
         async with metadata_engine.connect() as conn:
-            result = await conn.execute(text(query))
+            result = await conn.execute(text(query), {"row_limit": effective_limit})
             rows = result.mappings().all()
     except Exception as exc:
         raise ProfilerError(

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.requests import ExpectedResult
 
@@ -62,7 +62,9 @@ class SchedulerRuleStatusResponse(BaseModel):
 
 
 class DatabaseConnectionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     dataset: dict[str, Any]
-    schema: list[dict[str, Any]]
+    table_schema: list[dict[str, Any]] = Field(default_factory=list, alias="schema")
     rows: list[dict[str, Any]] = []
     message: str

@@ -256,8 +256,9 @@ async def run_full_pipeline(table_name: str, run_id: int) -> dict[str, Any]:
         else:
             anomalies = anomalies_result
 
-        # Stage 3: Finalize — PARTIAL_SUCCESS if any non-critical stage failed
-        final_status = "SUCCESS" if not stage_errors else "SUCCESS"
+        # Stage 3: Finalize. The current schema supports SUCCESS/FAILED, so
+        # non-critical stage failures are recorded in the run error field.
+        final_status = "SUCCESS"
         await finalize_run_task(
             run_id,
             final_status,

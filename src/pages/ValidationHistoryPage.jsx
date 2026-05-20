@@ -153,7 +153,7 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, runningRuleI
               {[
                 ['Status', result.status || 'Unknown'],
                 ['Observed Value', observedValue],
-                ['Duration', `${result.duration ?? 0} ms`],
+                ['Duration', result.duration ?? 'backend recorded'],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-md border border-slate-800 bg-[#0d1117]/80 px-3 py-2">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>

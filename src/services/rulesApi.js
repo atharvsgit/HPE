@@ -168,7 +168,7 @@ export async function createSavedRule(payload) {
   const requestPayload = {
     rule_name: payload.rule_name || payload.ruleName,
     sql: payload.sql,
-    expected_result: payload.expected_result || { type: 'zero_violations' },
+    expected_result: payload.expected_result ?? payload.expectedResult ?? { type: 'zero_violations' },
     schedule_cron: payload.schedule_cron ?? payload.scheduleCron ?? null,
     is_enabled: payload.is_enabled ?? payload.isEnabled ?? true,
   };

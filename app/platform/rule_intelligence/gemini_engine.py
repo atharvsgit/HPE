@@ -2,7 +2,7 @@
 app/platform/rule_intelligence/gemini_engine.py
 -------------------------------------------------
 Generates data quality rule suggestions using Google Gemini 2.5 Flash
-via the ``google-genai`` SDK (v2.3.0).
+via the optional ``google-genai`` SDK.
 
 The engine sends a structured prompt containing the dataset profile to
 Gemini and expects a JSON array of rule suggestion objects back.
@@ -56,7 +56,8 @@ async def suggest_rules_gemini(profile: dict, table_name: str) -> list[dict]:
         from google import genai  # type: ignore[import-untyped]
     except ImportError as exc:
         raise GeminiEngineError(
-            "google-genai is not installed. Add it to requirements.txt."
+            "google-genai is not installed in this prototype image. "
+            "Add it to requirements.txt before using backend='gemini'."
         ) from exc
 
     prompt = _build_prompt(profile, table_name)
