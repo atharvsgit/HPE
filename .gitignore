@@ -33,3 +33,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Internal project handoff / reference docs
+PROJECT_HANDOFF.md
+COPILOT_REVIEW.md
