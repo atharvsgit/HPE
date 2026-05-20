@@ -143,6 +143,31 @@ def test_list_rules(monkeypatch) -> None:
     assert response.json()[0]["rule_id"] == 1
 
 
+def test_delete_rule(monkeypatch) -> None:
+    async def fake_delete_rule(rule_id: int) -> bool:
+        assert rule_id == 1
+        return True
+
+    monkeypatch.setattr(routes.registry, "delete_rule", fake_delete_rule)
+
+    response = client.delete("/rules/1")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_delete_rule_not_found(monkeypatch) -> None:
+    async def fake_delete_rule(rule_id: int) -> bool:
+        assert rule_id == 404
+        return False
+
+    monkeypatch.setattr(routes.registry, "delete_rule", fake_delete_rule)
+
+    response = client.delete("/rules/404")
+
+    assert response.status_code == 404
+
+
 def test_run_saved_rule(monkeypatch) -> None:
     async def fake_get_rule(rule_id: int) -> SavedRuleResponse | None:
         return _saved_rule(rule_id)

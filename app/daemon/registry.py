@@ -133,6 +133,31 @@ async def get_rule(rule_id: int) -> SavedRuleResponse | None:
         return _saved_rule_from_row(row)
 
 
+async def delete_rule(rule_id: int) -> bool:
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE dq_results.test_results
+                SET rule_id = NULL
+                WHERE rule_id = :rule_id
+                """
+            ),
+            {"rule_id": rule_id},
+        )
+        result = await conn.execute(
+            text(
+                """
+                DELETE FROM dq_config.dq_rules
+                WHERE rule_id = :rule_id
+                RETURNING rule_id
+                """
+            ),
+            {"rule_id": rule_id},
+        )
+        return result.scalar_one_or_none() is not None
+
+
 async def list_rule_results(
     rule_id: int,
     limit: int = 20,

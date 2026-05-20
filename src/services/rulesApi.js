@@ -86,6 +86,8 @@ export const normalizeRule = (rule = {}) => ({
   datasetName: rule.dataset_name ?? rule.datasetName ?? rule.dataset ?? 'Company database',
   sql: rule.sql ?? rule.query ?? '',
   expectedResult: rule.expected_result ?? rule.expectedResult ?? { type: 'zero_violations' },
+  scheduleCron: rule.schedule_cron ?? rule.scheduleCron ?? null,
+  isEnabled: rule.is_enabled ?? rule.isEnabled ?? true,
   createdAt: toIsoString(rule.created_at ?? rule.createdAt),
   status: rule.status ?? 'active',
 });
@@ -175,6 +177,15 @@ export async function createSavedRule(payload) {
 
   const { data } = await api.post('/rules', requestPayload);
   return normalizeRule(data);
+}
+
+export async function deleteSavedRule(ruleId) {
+  if (!ruleId) {
+    throw new Error('A saved rule id is required before deleting.');
+  }
+
+  await api.delete(`/rules/${ruleId}`);
+  return true;
 }
 
 export async function getSavedRules() {

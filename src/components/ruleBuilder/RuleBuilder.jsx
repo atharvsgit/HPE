@@ -224,10 +224,87 @@ const toValidationResultsShape = (result, localPayload) => ({
   persistedResult: result,
 });
 
-const expectedResultForMode = (mode) =>
-  mode === 'query'
-    ? { type: 'min_threshold', value: 1 }
-    : { type: 'zero_violations' };
+const scheduleOptions = [
+  {
+    id: 'manual',
+    label: 'Do not schedule',
+    cron: null,
+    description: 'Save this rule for manual execution only.',
+  },
+  {
+    id: 'every_5_minutes',
+    label: 'Every 5 minutes',
+    cron: '*/5 * * * *',
+    description: 'Useful for quick demos and high-frequency checks.',
+  },
+  {
+    id: 'every_15_minutes',
+    label: 'Every 15 minutes',
+    cron: '*/15 * * * *',
+    description: 'Runs four times per hour.',
+  },
+  {
+    id: 'every_30_minutes',
+    label: 'Every 30 minutes',
+    cron: '*/30 * * * *',
+    description: 'Runs twice per hour.',
+  },
+  {
+    id: 'hourly',
+    label: 'Every hour',
+    cron: '0 * * * *',
+    description: 'Runs at the start of every hour.',
+  },
+  {
+    id: 'daily',
+    label: 'Every day',
+    cron: '0 9 * * *',
+    description: 'Runs daily at 09:00 UTC.',
+  },
+  {
+    id: 'weekly',
+    label: 'Every week',
+    cron: '0 9 * * 1',
+    description: 'Runs every Monday at 09:00 UTC.',
+  },
+  {
+    id: 'monthly',
+    label: 'Every month',
+    cron: '0 9 1 * *',
+    description: 'Runs on the first day of each month at 09:00 UTC.',
+  },
+  {
+    id: 'yearly',
+    label: 'Every year',
+    cron: '0 9 1 1 *',
+    description: 'Runs every January 1 at 09:00 UTC.',
+  },
+];
+
+const expectationOptions = [
+  {
+    id: 'zero_violations',
+    label: 'Zero violations',
+    description: 'Pass when the returned aggregate is exactly 0.',
+  },
+  {
+    id: 'min_threshold',
+    label: 'Minimum threshold',
+    description: 'Pass when the returned aggregate is greater than or equal to the threshold.',
+  },
+  {
+    id: 'max_threshold',
+    label: 'Maximum threshold',
+    description: 'Pass when the returned aggregate is less than or equal to the threshold.',
+  },
+  {
+    id: 'equals',
+    label: 'Exact aggregate',
+    description: 'Pass when the returned aggregate equals the configured value.',
+  },
+];
+
+const expectationNeedsValue = (type) => type !== 'zero_violations';
 
 function ResultSummaryCard({ label, value, hint }) {
   return (
@@ -264,6 +341,11 @@ export default function RuleBuilder() {
   const [activeAuthoringMode, setActiveAuthoringMode] = useState('assistant');
   const [loading, setLoading] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
+  const [schedulePreset, setSchedulePreset] = useState('manual');
+  const [queryMinThreshold, setQueryMinThreshold] = useState('1');
+  const [customExpectationEnabled, setCustomExpectationEnabled] = useState(false);
+  const [expectationType, setExpectationType] = useState('min_threshold');
+  const [expectationValue, setExpectationValue] = useState('1');
   const [compatibilityNotice, setCompatibilityNotice] = useState('');
   const [resultsHighlighted, setResultsHighlighted] = useState(false);
   const resultsSectionRef = useRef(null);
@@ -295,6 +377,9 @@ export default function RuleBuilder() {
   const applicableRuleIds =
     applicableRulesByType[selectedColumnTypeGroup] ||
     applicableRulesByType.default;
+  const selectedScheduleOption =
+    scheduleOptions.find((option) => option.id === schedulePreset) ||
+    scheduleOptions[0];
   const generatedSqlPreview = useMemo(
     () =>
       buildSqlFromRule({
@@ -325,6 +410,26 @@ export default function RuleBuilder() {
       `${getRuleLabel(selectedRule)} is not applicable for ${selectedColumnType} columns. Switched to ${getRuleLabel(fallbackRule)}.`,
     );
   }, [applicableRuleIds, selectedColumnMeta, selectedColumnType, selectedRule]);
+
+  const expectedResult = useMemo(() => {
+    if (customExpectationEnabled) {
+      return expectationNeedsValue(expectationType)
+        ? { type: expectationType, value: Number(expectationValue) }
+        : { type: expectationType };
+    }
+
+    if (semanticMode === 'query') {
+      return { type: 'min_threshold', value: Number(queryMinThreshold) };
+    }
+
+    return { type: 'zero_violations' };
+  }, [
+    customExpectationEnabled,
+    expectationType,
+    expectationValue,
+    queryMinThreshold,
+    semanticMode,
+  ]);
 
   const validationIssues = useMemo(() => {
     const issues = {};
@@ -384,18 +489,39 @@ export default function RuleBuilder() {
       }
     }
 
+    if (
+      semanticMode === 'query' &&
+      !customExpectationEnabled &&
+      (queryMinThreshold === '' || !Number.isFinite(Number(queryMinThreshold)))
+    ) {
+      issues.expectation = 'Enter a numeric minimum threshold for query mode.';
+    }
+
+    if (
+      customExpectationEnabled &&
+      expectationNeedsValue(expectationType) &&
+      (expectationValue === '' || !Number.isFinite(Number(expectationValue)))
+    ) {
+      issues.expectation = 'Enter a numeric value for the selected expectation.';
+    }
+
     return issues;
   }, [
     applicableRuleIds,
     params.max,
     params.min,
     params.pattern,
+    queryMinThreshold,
     schemaMetadata.length,
     selectedColumn,
     selectedColumnMeta,
     selectedColumnType,
     selectedDataset,
     selectedRule,
+    semanticMode,
+    customExpectationEnabled,
+    expectationType,
+    expectationValue,
   ]);
 
   const primaryValidationMessage =
@@ -408,6 +534,7 @@ export default function RuleBuilder() {
     validationIssues.min ||
     validationIssues.max ||
     validationIssues.pattern ||
+    validationIssues.expectation ||
     '';
 
   const canRunValidation =
@@ -659,7 +786,7 @@ export default function RuleBuilder() {
           dataset_name: selectedDataset?.name,
           rule_name: ruleName.trim() || 'Business validation rule',
           sql: sqlText.trim() || generatedSqlPreview,
-          expected_result: expectedResultForMode(semanticMode),
+          expected_result: expectedResult,
         },
         {
           datasetRows,
@@ -696,13 +823,17 @@ export default function RuleBuilder() {
         dataset_name: selectedDataset?.name,
         rule_name: ruleName.trim() || 'Business validation rule',
         sql: sqlText.trim() || generatedSqlPreview,
-        expected_result: expectedResultForMode(semanticMode),
+        expected_result: expectedResult,
+        schedule_cron: selectedScheduleOption.cron,
+        is_enabled: true,
       });
 
       pushToast({
         tone: 'success',
         title: 'Rule saved',
-        message: `${savedRule.ruleName} is available in saved validation history.`,
+        message: selectedScheduleOption.cron
+          ? `${savedRule.ruleName} was saved to run ${selectedScheduleOption.label.toLowerCase()}. Restart the scheduler container if it was already running.`
+          : `${savedRule.ruleName} is available in saved validation history.`,
       });
     } catch (error) {
       pushToast({
@@ -958,6 +1089,104 @@ export default function RuleBuilder() {
             </div>
           </div>
 
+          <div className="subtle-card">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">Expected Result</p>
+                <p className="field-hint">
+                  This controls how the backend turns the aggregate returned by your SQL into PASS or FAIL.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-3 text-sm font-semibold text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={customExpectationEnabled}
+                  onChange={(event) => setCustomExpectationEnabled(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400"
+                />
+                Custom expectation
+              </label>
+            </div>
+
+            {!customExpectationEnabled && semanticMode === 'query' && (
+              <div className="mt-4 max-w-sm">
+                <label className="field-label" htmlFor="query-min-threshold">
+                  Minimum Passing Count
+                </label>
+                <input
+                  id="query-min-threshold"
+                  type="number"
+                  value={queryMinThreshold}
+                  onChange={(event) => setQueryMinThreshold(event.target.value)}
+                  min="0"
+                  className={`input-shell ${validationIssues.expectation ? 'input-shell-error' : ''}`}
+                />
+                {validationIssues.expectation ? (
+                  <p className="field-error">{validationIssues.expectation}</p>
+                ) : (
+                  <p className="field-hint">
+                    Query mode passes when the aggregate is at least this value.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!customExpectationEnabled && semanticMode === 'validation' && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                <p className="text-sm font-semibold text-white">Zero violations</p>
+                <p className="field-hint">
+                  Validation mode passes when the aggregate returned by SQL is 0.
+                </p>
+              </div>
+            )}
+
+            {customExpectationEnabled && (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="field-label" htmlFor="expectation-type">
+                    Expectation Type
+                  </label>
+                  <select
+                    id="expectation-type"
+                    value={expectationType}
+                    onChange={(event) => setExpectationType(event.target.value)}
+                    className="input-shell"
+                  >
+                    {expectationOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="field-hint">
+                    {
+                      expectationOptions.find((option) => option.id === expectationType)
+                        ?.description
+                    }
+                  </p>
+                </div>
+
+                {expectationNeedsValue(expectationType) && (
+                  <div>
+                    <label className="field-label" htmlFor="expectation-value">
+                      Expected Value
+                    </label>
+                    <input
+                      id="expectation-value"
+                      type="number"
+                      value={expectationValue}
+                      onChange={(event) => setExpectationValue(event.target.value)}
+                      className={`input-shell ${validationIssues.expectation ? 'input-shell-error' : ''}`}
+                    />
+                    {validationIssues.expectation && (
+                      <p className="field-error">{validationIssues.expectation}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="field-label mb-0">Rule Type</p>
@@ -1152,6 +1381,43 @@ export default function RuleBuilder() {
             </div>
           )}
 
+          <div className="subtle-card">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">Schedule saved rule</p>
+                <p className="field-hint">
+                  Choose how often the scheduler should run this saved rule.
+                </p>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                {selectedScheduleOption.cron ? 'Scheduled' : 'Manual'}
+              </span>
+            </div>
+
+            <div className="mt-4 max-w-xl">
+              <div>
+                <label className="field-label" htmlFor="rule-schedule-preset">
+                  Schedule
+                </label>
+                <select
+                  id="rule-schedule-preset"
+                  value={schedulePreset}
+                  onChange={(event) => setSchedulePreset(event.target.value)}
+                  className="input-shell"
+                >
+                  {scheduleOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="field-hint">
+              {selectedScheduleOption.description} If the scheduler is already running, restart it after saving a new scheduled rule.
+            </p>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <button
               type="button"
@@ -1174,7 +1440,12 @@ export default function RuleBuilder() {
             <button
               type="button"
               onClick={handleSaveRule}
-              disabled={savingRule || !selectedDataset || !sqlText.trim()}
+              disabled={
+                savingRule ||
+                !selectedDataset ||
+                !sqlText.trim() ||
+                Boolean(primaryValidationMessage)
+              }
               className="secondary-button w-full sm:w-auto"
             >
               {savingRule ? <Loader label="Saving" compact /> : 'Save Rule'}

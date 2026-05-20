@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.daemon import connection, executor, registry
 from app.daemon.cron import CronValidationError
@@ -54,6 +54,14 @@ async def get_rule(rule_id: int) -> SavedRuleResponse:
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found.")
     return rule
+
+
+@router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_rule(rule_id: int) -> Response:
+    deleted = await registry.delete_rule(rule_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/rules/{rule_id}/run", response_model=RuleExecutionResult)

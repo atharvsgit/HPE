@@ -6,6 +6,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import { useDataset } from '../context/DatasetContext';
 import {
   createSavedRule,
+  deleteSavedRule,
   getSavedRules,
   getRuleResults,
   runSavedRule,
@@ -108,6 +109,19 @@ function ResultPanel({ result, onDeleteRule, onRunRule, onSaveRule, runningRuleI
                   Run
                 </>
               )}
+            </button>
+          )}
+
+          {canDeleteRule && (
+            <button
+              type="button"
+              onClick={() => onDeleteRule(result.ruleId, result.ruleName, result.id)}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete
             </button>
           )}
 
@@ -302,13 +316,30 @@ export default function ValidationHistoryPage() {
       return;
     }
 
-    setError('The current backend does not support deleting saved rules.');
-    closeDeleteModal();
-    pushToast({
-      tone: 'error',
-      title: 'Delete unavailable',
-      message: 'The current backend exposes rule creation and execution, but not saved-rule deletion.',
-    });
+    try {
+      await deleteSavedRule(ruleId);
+      const nextSelectedRuleId =
+        String(selectedRuleId) === String(ruleId) ? 'all' : selectedRuleId;
+      setSelectedRuleId(nextSelectedRuleId);
+      setSavedRules((currentRules) =>
+        currentRules.filter((rule) => String(rule.id) !== String(ruleId)),
+      );
+      await loadHistory(nextSelectedRuleId);
+      pushToast({
+        tone: 'success',
+        title: 'Rule deleted',
+        message: 'The saved rule was removed from the registry.',
+      });
+    } catch (deleteError) {
+      setError(deleteError.message || 'Saved rule could not be deleted.');
+      pushToast({
+        tone: 'error',
+        title: 'Delete failed',
+        message: deleteError.message || 'The saved rule registry rejected the delete request.',
+      });
+    } finally {
+      closeDeleteModal();
+    }
   };
 
   return (
@@ -383,15 +414,27 @@ export default function ValidationHistoryPage() {
                   <p className="mt-2 max-h-12 overflow-hidden text-sm leading-6 text-slate-400">
                     {rule.sql}
                   </p>
+                  <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-500">
+                    {rule.scheduleCron ? `Schedule ${rule.scheduleCron}` : 'Manual only'}
+                  </p>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleRunSavedRule(rule)}
-                  disabled={Boolean(runningRuleId)}
-                  className="secondary-button mt-4 w-full"
-                >
-                  {runningRuleId === rule.id ? <Loader label="Running" compact /> : 'Run Saved Rule'}
-                </button>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRunSavedRule(rule)}
+                    disabled={Boolean(runningRuleId)}
+                    className="secondary-button w-full"
+                  >
+                    {runningRuleId === rule.id ? <Loader label="Running" compact /> : 'Run Saved Rule'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => requestDeleteRule(rule.id, rule.ruleName, null)}
+                    className="secondary-button w-full border-rose-400/30 text-rose-200 hover:border-rose-300/60 hover:text-rose-100"
+                  >
+                    Delete Rule
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -462,7 +505,7 @@ export default function ValidationHistoryPage() {
         title={deleteCandidate?.ruleId ? "Delete saved rule" : "Remove from history"}
         message={
           deleteCandidate?.ruleId
-            ? `Delete "${deleteCandidate?.ruleName || 'this rule'}" from the saved rule registry? Existing backend support is required for remote rules.`
+            ? `Delete "${deleteCandidate?.ruleName || 'this rule'}" from the saved rule registry? Existing execution history remains available in the overall history feed.`
             : `Remove "${deleteCandidate?.ruleName || 'this execution'}" from your local view?`
         }
         confirmLabel="Delete"
