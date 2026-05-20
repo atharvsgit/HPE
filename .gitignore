@@ -9,11 +9,16 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage/
 
 # Virtual environments
 .venv/
 venv/
 env/
+
+# Node frontend dependencies and builds
+node_modules/
+dist/
 
 # Local editor and OS files
 .vscode/
@@ -29,3 +34,6 @@ Thumbs.db
 # Logs
 *.log
 
+# Internal project handoff / reference docs
+PROJECT_HANDOFF.md
+COPILOT_REVIEW.md

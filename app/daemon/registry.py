@@ -133,6 +133,31 @@ async def get_rule(rule_id: int) -> SavedRuleResponse | None:
         return _saved_rule_from_row(row)
 
 
+async def delete_rule(rule_id: int) -> bool:
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE dq_results.test_results
+                SET rule_id = NULL
+                WHERE rule_id = :rule_id
+                """
+            ),
+            {"rule_id": rule_id},
+        )
+        result = await conn.execute(
+            text(
+                """
+                DELETE FROM dq_config.dq_rules
+                WHERE rule_id = :rule_id
+                RETURNING rule_id
+                """
+            ),
+            {"rule_id": rule_id},
+        )
+        return result.scalar_one_or_none() is not None
+
+
 async def list_rule_results(
     rule_id: int,
     limit: int = 20,
@@ -145,6 +170,7 @@ async def list_rule_results(
                     result_id,
                     rule_id,
                     rule_name,
+                    sql_text,
                     status,
                     observed_key,
                     observed_value,
@@ -158,6 +184,32 @@ async def list_rule_results(
                 """
             ),
             {"rule_id": rule_id, "limit": limit},
+        )
+        return [_result_from_row(row) for row in result.mappings().all()]
+
+
+async def list_all_results(limit: int = 50) -> list[SavedRuleExecutionResultResponse]:
+    async with db_engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT
+                    result_id,
+                    rule_id,
+                    rule_name,
+                    sql_text,
+                    status,
+                    observed_key,
+                    observed_value,
+                    execution_time_ms,
+                    error_message,
+                    executed_at
+                FROM dq_results.test_results
+                ORDER BY executed_at DESC, result_id DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
         )
         return [_result_from_row(row) for row in result.mappings().all()]
 
@@ -192,6 +244,7 @@ def _result_from_row(row) -> SavedRuleExecutionResultResponse:
         result_id=row["result_id"],
         rule_id=row["rule_id"],
         rule_name=row["rule_name"],
+        sql=row["sql_text"],
         status=row["status"],
         observed_key=row["observed_key"],
         observed_value=_json_number(row["observed_value"]),

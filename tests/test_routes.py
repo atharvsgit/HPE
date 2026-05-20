@@ -6,6 +6,7 @@ from app.api import routes
 from app.main import app
 from app.models.requests import ExpectedResult, SavedRuleCreateRequest
 from app.models.responses import (
+    DatabaseConnectionResponse,
     RuleExecutionResult,
     SavedRuleExecutionResultResponse,
     SavedRuleResponse,
@@ -13,6 +14,50 @@ from app.models.responses import (
 )
 
 client = TestClient(app)
+
+
+def test_connect_database(monkeypatch) -> None:
+    async def fake_connect_database(request) -> DatabaseConnectionResponse:
+        assert request.source_type == "database"
+        assert request.config["table"] == "business_data.employees"
+        return DatabaseConnectionResponse(
+            dataset={
+                "id": "business_data.employees",
+                "name": "business_data.employees",
+                "table": "business_data.employees",
+                "records": 100000,
+            },
+            schema=[
+                {
+                    "columnName": "employee_id",
+                    "dataType": "bigint",
+                    "nullable": False,
+                }
+            ],
+            rows=[],
+            message="Connected to business_data.employees with 100000 rows.",
+        )
+
+    monkeypatch.setattr(routes.connection, "connect_database", fake_connect_database)
+
+    response = client.post(
+        "/connect-database",
+        json={
+            "source_type": "database",
+            "sub_type": "postgresql",
+            "config": {
+                "host": "postgres",
+                "port": "5432",
+                "database": "dq_test",
+                "username": "dq_app",
+                "password": "dq_app_password",
+                "table": "business_data.employees",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dataset"]["records"] == 100000
 
 
 def _saved_rule(rule_id: int = 1) -> SavedRuleResponse:
@@ -98,6 +143,31 @@ def test_list_rules(monkeypatch) -> None:
     assert response.json()[0]["rule_id"] == 1
 
 
+def test_delete_rule(monkeypatch) -> None:
+    async def fake_delete_rule(rule_id: int) -> bool:
+        assert rule_id == 1
+        return True
+
+    monkeypatch.setattr(routes.registry, "delete_rule", fake_delete_rule)
+
+    response = client.delete("/rules/1")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_delete_rule_not_found(monkeypatch) -> None:
+    async def fake_delete_rule(rule_id: int) -> bool:
+        assert rule_id == 404
+        return False
+
+    monkeypatch.setattr(routes.registry, "delete_rule", fake_delete_rule)
+
+    response = client.delete("/rules/404")
+
+    assert response.status_code == 404
+
+
 def test_run_saved_rule(monkeypatch) -> None:
     async def fake_get_rule(rule_id: int) -> SavedRuleResponse | None:
         return _saved_rule(rule_id)
@@ -140,6 +210,10 @@ def test_retrieve_results_for_saved_rule(monkeypatch) -> None:
                 result_id=22,
                 rule_id=1,
                 rule_name="No active employee has negative salary",
+                sql=(
+                    "SELECT COUNT(*) AS violation_count FROM business_data.employees "
+                    "WHERE status = 'active' AND salary < 0;"
+                ),
                 status="FAIL",
                 observed_key="violation_count",
                 observed_value=10,
@@ -156,6 +230,34 @@ def test_retrieve_results_for_saved_rule(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()[0]["result_id"] == 22
+    assert response.json()[0]["sql"].startswith("SELECT COUNT(*)")
+
+
+def test_retrieve_all_results_includes_ad_hoc(monkeypatch) -> None:
+    async def fake_list_all_results(limit: int) -> list[SavedRuleExecutionResultResponse]:
+        assert limit == 10
+        return [
+            SavedRuleExecutionResultResponse(
+                result_id=33,
+                rule_id=None,
+                rule_name="Negative salary check testing",
+                sql="SELECT COUNT(*) AS violation_count FROM business_data.employees WHERE salary < 0;",
+                status="FAIL",
+                observed_key="violation_count",
+                observed_value=10,
+                execution_time_ms=14,
+                error_message=None,
+                executed_at=datetime(2026, 5, 9, tzinfo=UTC),
+            )
+        ]
+
+    monkeypatch.setattr(routes.registry, "list_all_results", fake_list_all_results)
+
+    response = client.get("/results?limit=10")
+
+    assert response.status_code == 200
+    assert response.json()[0]["rule_id"] is None
+    assert response.json()[0]["rule_name"] == "Negative salary check testing"
 
 
 def test_preserves_ad_hoc_rules_run(monkeypatch) -> None:

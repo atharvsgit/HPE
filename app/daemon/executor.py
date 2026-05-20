@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import time
+import re
+import logging
+from collections.abc import Mapping
+from datetime import date
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -9,17 +13,32 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.daemon.evaluator import evaluate_observed_value
+from app.daemon.notifier import notify_admin_of_failure
 from app.daemon.sql_safety import SQLSafetyError, strip_trailing_semicolon, validate_safe_select
 from app.db.session import engine as db_engine
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import ErrorDetail, RuleExecutionResult
 from app.settings import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 def _json_number(value: Decimal) -> int | float:
     if value == value.to_integral_value():
         return int(value)
     return float(value)
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return _json_number(value)
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    return value
+
+
+def _json_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: _json_value(value) for key, value in dict(row).items()}
 
 
 def _numeric_value(raw_value: Any) -> Decimal:
@@ -61,10 +80,12 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
             error=ErrorDetail(type=exc.code, message=str(exc)),
         )
         await _persist_result(rule, result, None, None)
+        await _notify_if_needed(rule, result)
         return result
 
     observed_key: str | None = None
     observed_value: Decimal | None = None
+    violation_rows: list[dict[str, Any]] = []
 
     try:
         wrapped_sql = f"SELECT * FROM ({sql_body}) AS dq_rule_result LIMIT 2"
@@ -92,11 +113,16 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
 
         observed_value = _numeric_value(raw_value)
         status = evaluate_observed_value(observed_value, rule.expected_result)
+
+        if observed_key == "violation_count" and observed_value > 0 and status == "FAIL":
+            violation_rows = await _fetch_violation_preview(sql_body)
+
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
             rule_name=rule.rule_name,
             status=status,
             result={observed_key: _json_number(observed_value)},
+            violation_rows=violation_rows,
             expected_result=rule.expected_result,
             execution_time_ms=_elapsed_ms(started),
             executed_at=executed_at,
@@ -148,11 +174,53 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
         )
 
     await _persist_result(rule, result, observed_key, observed_value)
+    await _notify_if_needed(rule, result)
     return result
 
 
 class ResultShapeError(Exception):
     pass
+
+
+async def _notify_if_needed(rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
+    if result.status in {"FAIL", "ERROR"}:
+        try:
+            await notify_admin_of_failure(rule, result)
+        except Exception as exc:
+            logger.error("Notification dispatch failed: %s", exc)
+
+
+def _build_violation_preview_sql(sql_body: str, limit: int = 50) -> str | None:
+    normalized = sql_body.strip()
+    match = re.match(
+        r"(?is)^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+AS\s+violation_count\s+FROM\s+(.+?)\s+WHERE\s+(.+)$",
+        normalized,
+    )
+    if not match:
+        return None
+
+    from_clause = match.group(1).strip()
+    where_clause = match.group(2).strip()
+    if re.search(r"(?is)\b(GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|OFFSET)\b", where_clause):
+        return None
+
+    return f"SELECT * FROM {from_clause} WHERE {where_clause} LIMIT {limit}"
+
+
+async def _fetch_violation_preview(sql_body: str) -> list[dict[str, Any]]:
+    preview_sql = _build_violation_preview_sql(sql_body)
+    if preview_sql is None:
+        return []
+
+    settings = get_settings()
+    async with db_engine.connect() as conn:
+        async with conn.begin():
+            await conn.execute(text("SET TRANSACTION READ ONLY"))
+            await conn.execute(
+                text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
+            )
+            preview_result = await conn.execute(text(preview_sql))
+            return [_json_row(row) for row in preview_result.mappings().all()]
 
 
 def _elapsed_ms(started: float) -> int:

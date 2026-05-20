@@ -32,6 +32,9 @@ class FakeConnection:
         if "SELECT * FROM (" in sql:
             self.fake_engine.select_attempted = True
             return FakeResult(self.fake_engine.rows)
+        if sql.lstrip().upper().startswith("SELECT * FROM BUSINESS_DATA.EMPLOYEES"):
+            self.fake_engine.preview_attempted = True
+            return FakeResult(self.fake_engine.preview_rows)
         return FakeResult()
 
 
@@ -55,10 +58,16 @@ class FakeTransaction:
 
 
 class FakeEngine:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, object]],
+        preview_rows: list[dict[str, object]] | None = None,
+    ) -> None:
         self.rows = rows
+        self.preview_rows = preview_rows or []
         self.inserts: list[dict[str, object]] = []
         self.select_attempted = False
+        self.preview_attempted = False
 
     def connect(self) -> FakeConnectionContext:
         return FakeConnectionContext(self)
@@ -71,6 +80,8 @@ class FakeEngine:
 async def test_execute_rule_success(monkeypatch) -> None:
     fake_engine = FakeEngine([{"violation_count": Decimal("0")}])
     monkeypatch.setattr(executor, "db_engine", fake_engine)
+    notify = AsyncNotify()
+    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
     rule = RuleExecutionRequest(
         rule_name="No active employee has negative salary",
         sql="SELECT COUNT(*) AS violation_count FROM business_data.employees WHERE salary < 0;",
@@ -83,12 +94,18 @@ async def test_execute_rule_success(monkeypatch) -> None:
     assert result.result == {"violation_count": 0}
     assert fake_engine.select_attempted is True
     assert fake_engine.inserts[0]["status"] == "PASS"
+    assert notify.calls == []
 
 
 @pytest.mark.asyncio
 async def test_execute_rule_failure(monkeypatch) -> None:
-    fake_engine = FakeEngine([{"violation_count": Decimal("10")}])
+    fake_engine = FakeEngine(
+        [{"violation_count": Decimal("10")}],
+        [{"employee_id": 1, "salary": Decimal("-1000")}],
+    )
     monkeypatch.setattr(executor, "db_engine", fake_engine)
+    notify = AsyncNotify()
+    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
     rule = RuleExecutionRequest(
         rule_name="No active employee has negative salary",
         sql="SELECT COUNT(*) AS violation_count FROM business_data.employees WHERE salary < 0;",
@@ -99,13 +116,18 @@ async def test_execute_rule_failure(monkeypatch) -> None:
 
     assert result.status == "FAIL"
     assert result.result == {"violation_count": 10}
+    assert result.violation_rows == [{"employee_id": 1, "salary": -1000}]
+    assert fake_engine.preview_attempted is True
     assert fake_engine.inserts[0]["observed_value"] == Decimal("10")
+    assert notify.calls[0][1].status == "FAIL"
 
 
 @pytest.mark.asyncio
 async def test_execute_rule_rejects_invalid_sql(monkeypatch) -> None:
     fake_engine = FakeEngine([])
     monkeypatch.setattr(executor, "db_engine", fake_engine)
+    notify = AsyncNotify()
+    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
     rule = RuleExecutionRequest(
         rule_name="Dangerous SQL",
         sql="DELETE FROM business_data.employees;",
@@ -119,3 +141,12 @@ async def test_execute_rule_rejects_invalid_sql(monkeypatch) -> None:
     assert result.error.type == "INVALID_SQL"
     assert fake_engine.select_attempted is False
     assert fake_engine.inserts[0]["status"] == "ERROR"
+    assert notify.calls[0][1].error.type == "INVALID_SQL"
+
+
+class AsyncNotify:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def __call__(self, rule, result) -> None:
+        self.calls.append((rule, result))

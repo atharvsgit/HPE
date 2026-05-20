@@ -2,7 +2,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.platform_routes import platform_router
 from app.api.routes import router
 from app.db.session import close_db_engine
 
@@ -13,8 +15,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await close_db_engine()
 
 
-app = FastAPI(title="Data Quality Daemon", version="0.2.0", lifespan=lifespan)
+app = FastAPI(
+    title="Data Quality Daemon",
+    version="0.3.0",
+    description=(
+        "Data Quality Daemon with rule management, scheduling, notifications, "
+        "and platform intelligence endpoints."
+    ),
+    lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router)
+app.include_router(platform_router)
 
 
 @app.get("/health")
