@@ -9,6 +9,9 @@ const IngestionPage = lazy(() => import('./pages/IngestionPage'));
 const RulePage = lazy(() => import('./pages/RulePage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ValidationHistoryPage = lazy(() => import('./pages/ValidationHistoryPage'));
+const IntelligentAlertsDashboard = lazy(() => import('./pages/IntelligentAlertsDashboard'));
+const ViolationBatchTimeline = lazy(() => import('./pages/ViolationBatchTimeline'));
+const AIRuleBuilder = lazy(() => import('./pages/AIRuleBuilder'));
 
 const navigation = [
   {
@@ -23,6 +26,12 @@ const navigation = [
     description: 'Author business rules with assistant, builder, or SQL mode.',
     eyebrow: 'Validate',
   },
+  ...(import.meta.env.VITE_AI_RULE_BUILDER_ENABLED === 'true' ? [{
+    path: '/ai-rules',
+    label: 'AI Rule Builder',
+    description: 'Natural language to SQL rule generation.',
+    eyebrow: 'AI Assist',
+  }] : []),
   {
     path: '/dashboard',
     label: 'Run Dashboard',
@@ -34,6 +43,18 @@ const navigation = [
     label: 'Validation History',
     description: 'Revisit saved rules, executions, SQL, and aggregate outcomes.',
     eyebrow: 'Audit',
+  },
+  {
+    path: '/alerts',
+    label: 'Intelligent Alerts',
+    description: 'Aggregated violations with severity, dedup, and batch metrics.',
+    eyebrow: 'Alert',
+  },
+  {
+    path: '/batch-timeline',
+    label: 'Batch Timeline',
+    description: 'Track batch dispatch windows and force-send open batches.',
+    eyebrow: 'Dispatch',
   },
 ];
 
@@ -419,8 +440,13 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="/" element={<IngestionPage />} />
         <Route path="/rules" element={<RulePage />} />
+        {import.meta.env.VITE_AI_RULE_BUILDER_ENABLED === 'true' && (
+          <Route path="/ai-rules" element={<AIRuleBuilder />} />
+        )}
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/history" element={<ValidationHistoryPage />} />
+        <Route path="/alerts" element={<IntelligentAlertsDashboard />} />
+        <Route path="/batch-timeline" element={<ViolationBatchTimeline />} />
       </Route>
     </Routes>
   );

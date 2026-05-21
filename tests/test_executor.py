@@ -81,7 +81,7 @@ async def test_execute_rule_success(monkeypatch) -> None:
     fake_engine = FakeEngine([{"violation_count": Decimal("0")}])
     monkeypatch.setattr(executor, "db_engine", fake_engine)
     notify = AsyncNotify()
-    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
+    monkeypatch.setattr("app.services.violations.aggregator.process_violation", notify)
     rule = RuleExecutionRequest(
         rule_name="No active employee has negative salary",
         sql="SELECT COUNT(*) AS violation_count FROM business_data.employees WHERE salary < 0;",
@@ -105,7 +105,7 @@ async def test_execute_rule_failure(monkeypatch) -> None:
     )
     monkeypatch.setattr(executor, "db_engine", fake_engine)
     notify = AsyncNotify()
-    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
+    monkeypatch.setattr("app.services.violations.aggregator.process_violation", notify)
     rule = RuleExecutionRequest(
         rule_name="No active employee has negative salary",
         sql="SELECT COUNT(*) AS violation_count FROM business_data.employees WHERE salary < 0;",
@@ -127,7 +127,7 @@ async def test_execute_rule_rejects_invalid_sql(monkeypatch) -> None:
     fake_engine = FakeEngine([])
     monkeypatch.setattr(executor, "db_engine", fake_engine)
     notify = AsyncNotify()
-    monkeypatch.setattr(executor, "notify_admin_of_failure", notify)
+    monkeypatch.setattr("app.services.violations.aggregator.process_violation", notify)
     rule = RuleExecutionRequest(
         rule_name="Dangerous SQL",
         sql="DELETE FROM business_data.employees;",

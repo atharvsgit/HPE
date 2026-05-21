@@ -36,6 +36,7 @@ class SavedRuleCreateRequest(BaseModel):
     expected_result: ExpectedResult
     schedule_cron: str | None = None
     is_enabled: bool = True
+    severity: Literal["critical", "high", "medium", "low"] = "medium"
 
 
 class DatabaseConnectionRequest(BaseModel):

@@ -12,6 +12,18 @@ class ErrorDetail(BaseModel):
     message: str
 
 
+class AIEnrichment(BaseModel):
+    ai_summary: str | None = None
+    root_causes: list[str] = Field(default_factory=list)
+    suggested_fixes: list[str] = Field(default_factory=list)
+    confidence_score: str | None = None
+    prompt_version: str | None = None
+    provider_name: str | None = None
+    model_name: str | None = None
+    token_usage: int | None = None
+    parsing_failure: bool = False
+
+
 class RuleExecutionResult(BaseModel):
     rule_id: int | None = None
     rule_name: str
@@ -22,6 +34,7 @@ class RuleExecutionResult(BaseModel):
     execution_time_ms: int
     executed_at: datetime
     error: ErrorDetail | None
+    ai_enrichment: AIEnrichment | None = None
 
 
 class SavedRuleResponse(BaseModel):
@@ -31,6 +44,7 @@ class SavedRuleResponse(BaseModel):
     expected_result: ExpectedResult
     schedule_cron: str | None
     is_enabled: bool
+    severity: Literal["critical", "high", "medium", "low"]
     created_at: datetime
     updated_at: datetime
 
