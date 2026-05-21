@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useDataset } from '../context/DatasetContext';
+import api from '../services/api';
 
 export default function AIRuleBuilder() {
   const { selectedDataset } = useDataset();
@@ -26,26 +27,16 @@ export default function AIRuleBuilder() {
       const schemaName = parts.length === 2 ? parts[0] : 'business_data';
       const tableName = parts.length === 2 ? parts[1] : parts[0];
 
-      const res = await fetch('http://localhost:8000/ai-rules/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          schema_name: schemaName,
-          table_name: tableName
-        })
+      const { data } = await api.post('/ai-rules/generate', {
+        prompt,
+        schema_name: schemaName,
+        table_name: tableName
       });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'Failed to generate rule');
-      }
-      
-      const data = await res.json();
+
       setGeneratedResult(data);
       setEditedSql(data.sql);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Failed to generate rule');
     } finally {
       setLoading(false);
     }
@@ -57,21 +48,10 @@ export default function AIRuleBuilder() {
     setError(null);
     
     try {
-      const res = await fetch('http://localhost:8000/ai-rules/dry-run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql: editedSql })
-      });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'Dry run failed');
-      }
-      
-      const data = await res.json();
+      const { data } = await api.post('/ai-rules/dry-run', { sql: editedSql });
       setDryRunResult(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Dry run failed');
     } finally {
       setLoading(false);
     }
@@ -83,23 +63,14 @@ export default function AIRuleBuilder() {
     setError(null);
     
     try {
-      const res = await fetch('http://localhost:8000/ai-rules/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          generation_id: generatedResult.id,
-          reviewed_sql: editedSql
-        })
+      await api.post('/ai-rules/save', {
+        generation_id: generatedResult.id,
+        reviewed_sql: editedSql
       });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'Save failed');
-      }
-      
+
       setSaveStatus('success');
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Save failed');
     } finally {
       setLoading(false);
     }

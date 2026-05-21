@@ -16,9 +16,11 @@ All LLM work happens exclusively here, in the Celery worker process.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, UTC
+from decimal import Decimal
 
 from celery import Celery
 from celery.utils.log import get_task_logger
@@ -52,7 +54,16 @@ task_logger = get_task_logger(__name__)
 
 def _run_async(coro):
     """Run an async coroutine from a synchronous Celery task."""
-    return asyncio.run(coro)
+    return asyncio.run(_run_and_close(coro))
+
+
+async def _run_and_close(coro):
+    try:
+        return await coro
+    finally:
+        from app.db.session import close_db_engine
+
+        await close_db_engine()
 
 
 @celery_app.task(
@@ -103,12 +114,39 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
             value=expected.get("value"),
         ),
     )
+    async with db_engine.connect() as conn:
+        batch_row = (await conn.execute(
+            text(
+                """
+                SELECT total_violation_count
+                FROM dq_results.violation_batches
+                WHERE id = :batch_id
+                """
+            ),
+            {"batch_id": batch_id},
+        )).mappings().first()
+        event_row = (await conn.execute(
+            text(
+                """
+                SELECT sample_rows
+                FROM dq_results.violation_events
+                WHERE rule_id = :rule_id
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"rule_id": rule_dict["rule_id"]},
+        )).mappings().first()
+
+    violation_count = _json_number(batch_row["total_violation_count"]) if batch_row else None
+    violation_rows = _parse_sample_rows(event_row["sample_rows"]) if event_row else []
+
     pseudo_result = RuleExecutionResult(
         rule_id=rule_dict["rule_id"],
         rule_name=rule_dict["rule_name"],
         status="FAIL",
-        result=None,
-        violation_rows=[],
+        result={"violation_count": violation_count} if violation_count is not None else None,
+        violation_rows=violation_rows,
         expected_result=pseudo_rule.expected_result,
         execution_time_ms=0,
         executed_at=datetime.now(UTC),
@@ -194,3 +232,26 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
                 ),
                 {"rule_id": rule_dict["rule_id"]},
             )
+
+
+def _json_number(value):
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    return value
+
+
+def _parse_sample_rows(value) -> list[dict]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    else:
+        parsed = value
+    return parsed if isinstance(parsed, list) else []

@@ -252,8 +252,16 @@ async def generate_batch_summary(batch_id: int, force: bool = False) -> AIEnrich
         )
 
     # --- Phase B: Human-Validated Notification Enrichment ---
-    historical = await _get_historical_human_correction(context["rule_id"])
-    
+    try:
+        historical = await _get_historical_human_correction(context["rule_id"])
+    except Exception as exc:
+        logger.error(
+            "Failed to fetch historical human correction for rule_id=%s. error=%s",
+            context["rule_id"],
+            exc,
+        )
+        historical = None
+
     final_summary = parsed["summary"]
     final_fixes = parsed["suggested_fixes"]
     

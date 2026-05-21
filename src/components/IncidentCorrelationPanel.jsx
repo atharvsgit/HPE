@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import StatusBadge from './common/StatusBadge';
 import Loader from './common/Loader';
+import api from '../services/api';
 
 const statusTone = (status) => {
   const normalized = String(status || '').toUpperCase();
@@ -27,16 +28,14 @@ export default function IncidentCorrelationPanel({ batchId }) {
     const fetchCorrelations = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`http://localhost:8000/ai-rules/correlations/${batchId}`);
-        if (!res.ok) throw new Error('Failed to fetch correlations');
-        const data = await res.json();
-        
+        const { data } = await api.get(`/ai-rules/correlations/${batchId}`);
+
         if (mounted) {
           setCorrelations(data.correlations || []);
           setMessage(data.message || '');
         }
       } catch (err) {
-        if (mounted) setError(err.message);
+        if (mounted) setError(err.response?.data?.detail || err.message || 'Failed to fetch correlations');
       } finally {
         if (mounted) setLoading(false);
       }

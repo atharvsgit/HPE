@@ -20,8 +20,9 @@ async def test_generate_batch_summary_disabled(mock_get_settings):
 @patch("app.services.llm.orchestrator._fetch_batch_context", new_callable=AsyncMock)
 @patch("app.services.llm.orchestrator.GroqProvider.generate_json", new_callable=AsyncMock)
 @patch("app.services.llm.orchestrator._persist_summary", new_callable=AsyncMock)
+@patch("app.services.llm.orchestrator._get_historical_human_correction", new_callable=AsyncMock)
 async def test_generate_batch_summary_success(
-    mock_persist, mock_generate, mock_fetch, mock_existing, mock_get_settings
+    mock_historical, mock_persist, mock_generate, mock_fetch, mock_existing, mock_get_settings
 ):
     mock_settings = MockSettings()
     mock_settings.llm_enabled = True
@@ -37,12 +38,14 @@ async def test_generate_batch_summary_success(
         "sample_rows": [{"id": 1}],
         "trend_summary": "Test trend"
     }
-    
+    mock_historical.return_value = None
+
     mock_generate.return_value = {
         "summary": "AI summary",
         "root_causes": ["cause 1"],
         "suggested_fixes": ["fix 1"],
-        "business_impact": "impact"
+        "business_impact": "impact",
+        "confidence": "high",
     }
     
     result = await generate_batch_summary(1)

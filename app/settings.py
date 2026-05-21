@@ -53,7 +53,7 @@ class Settings(BaseModel):
         "alerts@dataqualitydaemon.local",
     )
     admin_email: str | None = os.getenv("ADMIN_EMAIL")
-    
+
     # -------------------------------------------------------------------------
     # Intelligent Alert Dispatcher (LLM Enrichment)
     # -------------------------------------------------------------------------

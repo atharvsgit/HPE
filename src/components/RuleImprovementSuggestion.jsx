@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import api from '../services/api';
 
 export default function RuleImprovementSuggestion({ ruleId }) {
   const [suggestion, setSuggestion] = useState(null);
@@ -10,12 +11,10 @@ export default function RuleImprovementSuggestion({ ruleId }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:8000/ai-rules/suggestions/${ruleId}`);
-      if (!res.ok) throw new Error('Failed to fetch suggestion');
-      const data = await res.json();
+      const { data } = await api.get(`/ai-rules/suggestions/${ruleId}`);
       setSuggestion(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Failed to fetch suggestion');
     } finally {
       setLoading(false);
     }
@@ -27,13 +26,8 @@ export default function RuleImprovementSuggestion({ ruleId }) {
     // In a full implementation, the API should return { id: 1, ...raw_json }. We'll mock it for now.
     setStatusUpdating(true);
     try {
-      const suggestionId = suggestion.id || 1; 
-      const res = await fetch(`http://localhost:8000/ai-rules/suggestions/${suggestionId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      if (!res.ok) throw new Error('Failed to update status');
+      const suggestionId = suggestion.id || 1;
+      await api.post(`/ai-rules/suggestions/${suggestionId}/status`, { status });
       setSuggestion(prev => ({ ...prev, status }));
     } catch (err) {
       console.error(err);

@@ -13,3 +13,6 @@ CREATE TABLE IF NOT EXISTS dq_results.llm_feedback (
 );
 
 CREATE INDEX idx_llm_feedback_batch ON dq_results.llm_feedback(violation_batch_id, created_at DESC);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON dq_results.llm_feedback TO dq_app;
+GRANT USAGE, SELECT ON SEQUENCE dq_results.llm_feedback_id_seq TO dq_app;
