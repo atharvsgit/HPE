@@ -13,7 +13,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.daemon.evaluator import evaluate_observed_value
-from app.daemon.notifier import notify_admin_of_failure
 from app.daemon.sql_safety import SQLSafetyError, strip_trailing_semicolon, validate_safe_select
 from app.db.session import engine as db_engine
 from app.models.requests import RuleExecutionRequest
@@ -185,7 +184,8 @@ class ResultShapeError(Exception):
 async def _notify_if_needed(rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
     if result.status in {"FAIL", "ERROR"}:
         try:
-            await notify_admin_of_failure(rule, result)
+            from app.services.violations.aggregator import process_violation
+            await process_violation(rule, result)
         except Exception as exc:
             logger.error("Notification dispatch failed: %s", exc)
 

@@ -53,7 +53,14 @@ class Settings(BaseModel):
         "alerts@dataqualitydaemon.local",
     )
     admin_email: str | None = os.getenv("ADMIN_EMAIL")
-
+    
+    # -------------------------------------------------------------------------
+    # Intelligent Alert Dispatcher (LLM Enrichment)
+    # -------------------------------------------------------------------------
+    celery_broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "llama3-8b-8192")
+    llm_enabled: bool = os.getenv("LLM_ENABLED", "false").lower() in {"1", "true", "yes"}
     # -------------------------------------------------------------------------
     # Platform Intelligence (Manjunath Patil)
     # -------------------------------------------------------------------------

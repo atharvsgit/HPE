@@ -14,3 +14,9 @@ sqlglot>=30.0,<31.0
 pandas>=2.2,<3.0
 numpy>=1.26,<3.0
 loguru>=0.7,<1.0
+
+# --- LLM Integration ---
+groq>=0.9.0
+celery>=5.4.0
+redis>=5.0.0
+tenacity>=8.0.0

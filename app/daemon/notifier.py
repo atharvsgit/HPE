@@ -39,6 +39,16 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
     if result.error is not None:
         lines.append(f"Error: {result.error.type}: {result.error.message}")
 
+    if result.ai_enrichment:
+        if result.ai_enrichment.ai_summary:
+            lines.append(f"AI Summary: {result.ai_enrichment.ai_summary}")
+        if result.ai_enrichment.root_causes:
+            lines.append(f"Root Causes: {', '.join(result.ai_enrichment.root_causes)}")
+        if result.ai_enrichment.suggested_fixes:
+            lines.append(f"Suggested Fixes: {', '.join(result.ai_enrichment.suggested_fixes)}")
+        if result.ai_enrichment.confidence_score is not None:
+            lines.append(f"AI Confidence: {result.ai_enrichment.confidence_score}")
+
     lines.append(f"Executed at: {result.executed_at.isoformat()}")
 
     return "\n".join(lines)

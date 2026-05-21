@@ -26,7 +26,8 @@ async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
                     expected_result_type,
                     expected_result_value,
                     is_enabled,
-                    schedule_cron
+                    schedule_cron,
+                    severity
                 )
                 VALUES (
                     :rule_name,
@@ -34,7 +35,8 @@ async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
                     :expected_result_type,
                     :expected_result_value,
                     :is_enabled,
-                    :schedule_cron
+                    :schedule_cron,
+                    :severity
                 )
                 RETURNING
                     rule_id,
@@ -44,6 +46,7 @@ async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
                     expected_result_value,
                     is_enabled,
                     schedule_cron,
+                    severity,
                     created_at,
                     updated_at
                 """
@@ -55,6 +58,7 @@ async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
                 "expected_result_value": rule.expected_result.value,
                 "is_enabled": rule.is_enabled,
                 "schedule_cron": rule.schedule_cron,
+                "severity": rule.severity,
             },
         )
         return _saved_rule_from_row(result.mappings().one())
@@ -73,6 +77,7 @@ async def list_rules() -> list[SavedRuleResponse]:
                     expected_result_value,
                     is_enabled,
                     schedule_cron,
+                    severity,
                     created_at,
                     updated_at
                 FROM dq_config.dq_rules
@@ -119,6 +124,7 @@ async def get_rule(rule_id: int) -> SavedRuleResponse | None:
                     expected_result_value,
                     is_enabled,
                     schedule_cron,
+                    severity,
                     created_at,
                     updated_at
                 FROM dq_config.dq_rules
@@ -234,6 +240,7 @@ def _saved_rule_from_row(row) -> SavedRuleResponse:
         ),
         schedule_cron=row["schedule_cron"],
         is_enabled=row["is_enabled"],
+        severity=row["severity"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

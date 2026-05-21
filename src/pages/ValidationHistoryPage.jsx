@@ -3,6 +3,7 @@ import ConfirmationModal from '../components/common/ConfirmationModal';
 import Loader from '../components/common/Loader';
 import ResultTable from '../components/common/ResultTable';
 import StatusBadge from '../components/common/StatusBadge';
+import RuleImprovementSuggestion from '../components/RuleImprovementSuggestion';
 import { useDataset } from '../context/DatasetContext';
 import {
   createSavedRule,
@@ -434,6 +435,9 @@ export default function ValidationHistoryPage() {
                   >
                     Delete Rule
                   </button>
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-700/50">
+                  <RuleImprovementSuggestion ruleId={rule.id} />
                 </div>
               </div>
             ))}
