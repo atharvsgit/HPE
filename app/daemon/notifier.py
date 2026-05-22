@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import smtplib
+import csv
+from io import StringIO
 from email.message import EmailMessage
 
 import httpx
@@ -78,10 +80,7 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
     if result.violation_rows:
         lines.extend([
             "",
-            "-- VIOLATION ROWS PREVIEW ---------------",
-            "```",
-            _generate_ascii_table(result.violation_rows, max_rows=10),
-            "```"
+            f"Violation rows attached as CSV ({len(result.violation_rows)} rows)."
         ])
 
     lines.append("=========================================")
@@ -117,47 +116,57 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
         """
 
     violations_html = ""
+
     if result.violation_rows:
-        cols = list(result.violation_rows[0].keys())
-        table_rows = []
-        for idx, row in enumerate(result.violation_rows[:10]):
-            bg_color = "#f8fafc" if idx % 2 == 1 else "#ffffff"
-            cells = []
-            for col in cols:
-                val = html.escape(str(row.get(col, "")))
-                cells.append(f"<td style='padding: 10px; border-bottom: 1px solid #e2e8f0; color: #334155; font-size: 13px;'>{val}</td>")
-            table_rows.append(f"<tr style='background-color: {bg_color};'>{''.join(cells)}</tr>")
-            
-        headers = "".join(
-            f"<th style='padding: 10px; border-bottom: 2px solid #e2e8f0; text-align: left; background-color: #f1f5f9; color: #1e293b; font-weight: 600; font-size: 13px;'>{html.escape(col)}</th>"
-            for col in cols
-        )
-        
-        limit_notice = ""
-        if len(result.violation_rows) > 10:
-            limit_notice = f"<div style='margin-top: 8px; color: #64748b; font-size: 13px; font-style: italic;'>Showing first 10 of {len(result.violation_rows)} violation rows.</div>"
-            
         violations_html = f"""
         <div style="margin-top: 25px;">
-            <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; display: block; margin-bottom: 8px;">Violations Causing Alert</span>
-            <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
-                <table style="width: 100%; border-collapse: collapse; text-align: left;">
-                    <thead>
-                        <tr>{headers}</tr>
-                    </thead>
-                    <tbody>
-                        {"".join(table_rows)}
-                    </tbody>
-                </table>
+            <span style="
+                font-size: 11px;
+                text-transform: uppercase;
+                color: #64748b;
+                font-weight: 600;
+                display: block;
+                margin-bottom: 8px;
+            ">
+                Violation Rows
+            </span>
+
+            <div style="
+                padding: 20px;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                background-color: #f8fafc;
+                color: #334155;
+                font-size: 14px;
+            ">
+                {len(result.violation_rows)} violation rows detected.
+                Full details are attached in the CSV file.
             </div>
-            {limit_notice}
         </div>
         """
+
     elif status == "FAIL":
         violations_html = """
         <div style="margin-top: 25px;">
-            <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; display: block; margin-bottom: 8px;">Violations Causing Alert</span>
-            <div style="padding: 20px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center; color: #64748b; font-size: 13px;">
+            <span style="
+                font-size: 11px;
+                text-transform: uppercase;
+                color: #64748b;
+                font-weight: 600;
+                display: block;
+                margin-bottom: 8px;
+            ">
+                Violation Rows
+            </span>
+
+            <div style="
+                padding: 20px;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                text-align: center;
+                color: #64748b;
+                font-size: 13px;
+            ">
                 Rule failed but no violation rows were returned.
             </div>
         </div>
@@ -292,6 +301,27 @@ def _send_email_notification_sync(
 
             if settings.smtp_username and settings.smtp_password:
                 server.login(settings.smtp_username, settings.smtp_password)
+
+            # Attach violation rows as CSV
+            if result.violation_rows:
+                csv_buffer = StringIO()
+
+                writer = csv.DictWriter(
+                    csv_buffer,
+                    fieldnames=result.violation_rows[0].keys()
+                )
+
+                writer.writeheader()
+                writer.writerows(result.violation_rows)
+
+                csv_content = csv_buffer.getvalue()
+
+                message.add_attachment(
+                    csv_content.encode("utf-8"),
+                    maintype="text",
+                    subtype="csv",
+                    filename=f"rule_{rule.rule_id or 'adhoc'}_violations.csv",
+                )
 
             server.send_message(message)
         logger.info("Sent data quality alert email for rule %s.", rule.rule_name)
