@@ -47,7 +47,7 @@ def _generate_ascii_table(rows: list[dict[str, Any]], max_rows: int = 10) -> str
 def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
     lines = [
         "=========================================",
-        f"🚨 DATA QUALITY RULE {result.status} ALERT",
+        f"DATA QUALITY RULE {result.status} ALERT",
         "=========================================",
         f"Rule: {rule.rule_name}",
         f"Rule ID: {rule.rule_id if rule.rule_id is not None else 'ad hoc'}",
@@ -66,11 +66,6 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
         observed_val = ", ".join(f"{k}: {v}" for k, v in result.result.items())
         lines.append(f"Observed result: {observed_val}")
 
-    lines.extend([
-        "",
-        "-- SQL QUERY ----------------------------",
-        rule.sql,
-    ])
 
     if result.error is not None:
         lines.extend([
@@ -213,12 +208,6 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
                     </td>
                 </tr>
             </table>
-
-            <!-- SQL Query -->
-            <div style="margin-bottom: 25px;">
-                <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; display: block; margin-bottom: 5px;">Executed Query</span>
-                <pre style="margin: 0; background-color: #f1f5f9; padding: 15px; border-radius: 6px; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 12px; color: #334155; overflow-x: auto; border-left: 4px solid #cbd5e1; white-space: pre-wrap; word-break: break-all;">{html.escape(rule.sql)}</pre>
-            </div>
             
             {error_html}
 
