@@ -240,31 +240,79 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
 async def _send_slack_notification(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
-    webhook_url: str,
-    timeout_seconds: float,
+    settings: Settings,
 ) -> None:
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            response = await client.post(
-                webhook_url,
-                json={"text": _notification_text(rule, result)},
+        async with httpx.AsyncClient(timeout=settings.notification_http_timeout_seconds) as client:
+
+            # Send normal Slack alert message
+
+            await client.post(
+                settings.slack_webhook_url,
+                json={
+                    "text": _notification_text(rule, result)
+                },
             )
-            response.raise_for_status()
-        logger.info("Sent data quality alert to Slack for rule %s.", rule.rule_name)
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Failed to send Slack data quality alert: HTTP %s",
-            exc.response.status_code,
+
+            # Upload CSV file if violation rows exist
+
+            if result.violation_rows and settings.slack_bot_token and settings.slack_channel:
+
+                csv_buffer = StringIO()
+
+                writer = csv.DictWriter(
+                    csv_buffer,
+                    fieldnames=result.violation_rows[0].keys()
+                )
+
+                writer.writeheader()
+                writer.writerows(result.violation_rows)
+
+                csv_content = csv_buffer.getvalue()
+
+                files = {
+                    "file": (
+                        f"rule_{rule.rule_id or 'adhoc'}_violations.csv",
+                        csv_content,
+                        "text/csv",
+                    )
+                }
+
+                data = {
+                    "channels": settings.slack_channel,
+                    "initial_comment": (
+                        f"Violation CSV for rule: {rule.rule_name}"
+                    ),
+                }
+
+                headers = {
+                    "Authorization": f"Bearer {settings.slack_bot_token}"
+                }
+
+                upload_response = await client.post(
+                    "https://slack.com/api/files.upload",
+                    headers=headers,
+                    data=data,
+                    files=files,
+                )
+
+                upload_json = upload_response.json()
+
+                if not upload_json.get("ok"):
+                    logger.error(
+                        "Slack file upload failed: %s",
+                        upload_json
+                    )
+
+        logger.info(
+            "Sent Slack notification for rule %s.",
+            rule.rule_name,
         )
-    except httpx.HTTPError as exc:
-        logger.error(
-            "Failed to send Slack data quality alert: %s",
-            type(exc).__name__,
-        )
+
     except Exception as exc:
         logger.error(
-            "Failed to send Slack data quality alert: %s",
-            type(exc).__name__,
+            "Failed to send Slack alert: %s",
+            exc,
         )
 
 
@@ -350,10 +398,11 @@ async def notify_admin_of_failure(
     if settings.slack_webhook_url:
         tasks.append(
             _send_slack_notification(
-                rule,
-                result,
-                settings.slack_webhook_url,
-                settings.notification_http_timeout_seconds,
+                _send_slack_notification(
+                    rule,
+                    result,
+                    settings,
+                )
             )
         )
 
