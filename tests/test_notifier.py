@@ -66,8 +66,12 @@ async def test_notifies_slack_and_email_on_failure(
 
     mock_httpx_post.assert_called_once()
     assert mock_httpx_post.call_args.args[0] == "http://slack.test"
-    assert "DATA QUALITY RULE ALERT" in mock_httpx_post.call_args.kwargs["json"]["text"]
-    assert "Violation rows preview" in mock_httpx_post.call_args.kwargs["json"]["text"]
+    slack_payload = mock_httpx_post.call_args.kwargs["json"]["text"]
+    assert "DATA QUALITY RULE FAIL ALERT" in slack_payload
+    assert "VIOLATION ROWS PREVIEW" in slack_payload
+    assert "employee_id | salary" in slack_payload
+    assert "1           | -1000" in slack_payload
+
     mock_smtp_class.assert_called_once_with("smtp.test", 587, timeout=3)
     mock_smtp_instance.starttls.assert_called_once()
     mock_smtp_instance.login.assert_called_once_with("user", "password")
@@ -75,6 +79,26 @@ async def test_notifies_slack_and_email_on_failure(
     sent_message = mock_smtp_instance.send_message.call_args.args[0]
     assert sent_message["Subject"] == "Data Quality Alert: No active employee has negative salary"
     assert sent_message["To"] == "admin@test.com"
+
+    # Check multipart structure
+    assert sent_message.is_multipart()
+    payloads = list(sent_message.iter_parts())
+    assert len(payloads) == 2
+    assert payloads[0].get_content_type() == "text/plain"
+    assert payloads[1].get_content_type() == "text/html"
+
+    # Check text content
+    text_body = payloads[0].get_content()
+    assert "DATA QUALITY RULE FAIL ALERT" in text_body
+    assert "VIOLATION ROWS PREVIEW" in text_body
+    assert "employee_id | salary" in text_body
+
+    # Check HTML content
+    html_body = payloads[1].get_content()
+    assert "<!DOCTYPE html>" in html_body
+    assert "No active employee has negative salary" in html_body
+    assert "employee_id" in html_body
+    assert "salary" in html_body
 
 
 @pytest.mark.asyncio
