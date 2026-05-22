@@ -398,11 +398,9 @@ async def notify_admin_of_failure(
     if settings.slack_webhook_url:
         tasks.append(
             _send_slack_notification(
-                _send_slack_notification(
-                    rule,
-                    result,
-                    settings,
-                )
+                rule,
+                result,
+                settings,
             )
         )
 
