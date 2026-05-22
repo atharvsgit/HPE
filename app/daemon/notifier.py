@@ -7,6 +7,7 @@ import smtplib
 import csv
 from io import StringIO
 from email.message import EmailMessage
+from slack_sdk.web.async_client import AsyncWebClient
 
 import httpx
 
@@ -270,31 +271,17 @@ async def _send_slack_notification(
 
                 csv_content = csv_buffer.getvalue()
 
-                files = {
-                    "file": (
-                        f"rule_{rule.rule_id or 'adhoc'}_violations.csv",
-                        csv_content,
-                        "text/csv",
-                    )
-                }
+                slack_client = AsyncWebClient(token=settings.slack_bot_token)
 
-                data = {
-                    "channels": settings.slack_channel,
-                    "initial_comment": (
-                        f"Violation CSV for rule: {rule.rule_name}"
-                    ),
-                }
-
-                headers = {
-                    "Authorization": f"Bearer {settings.slack_bot_token}"
-                }
-
-                upload_response = await client.post(
-                    "https://slack.com/api/files.upload",
-                    headers=headers,
-                    data=data,
-                    files=files,
+                upload_response = await slack_client.files_upload_v2(
+                    channel=settings.slack_channel,
+                    filename=f"rule_{rule.rule_id or 'adhoc'}_violations.csv",
+                    title=f"Violation Rows - {rule.rule_name}",
+                    content=csv_content,
+                    initial_comment=f"Violation CSV for rule: {rule.rule_name}",
                 )
+
+                logger.info(upload_response)
 
                 upload_json = upload_response.json()
 
