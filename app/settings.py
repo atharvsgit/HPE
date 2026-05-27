@@ -39,6 +39,8 @@ class Settings(BaseModel):
     pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
     rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120"))
     slack_webhook_url: str | None = os.getenv("SLACK_WEBHOOK_URL")
+    slack_bot_token: str | None = os.getenv("SLACK_BOT_TOKEN")
+    slack_channel: str | None = os.getenv("SLACK_CHANNEL")
     smtp_server: str | None = os.getenv("SMTP_SERVER")
     smtp_port: int | None = _optional_int("SMTP_PORT", 587)
     smtp_username: str | None = os.getenv("SMTP_USERNAME")
