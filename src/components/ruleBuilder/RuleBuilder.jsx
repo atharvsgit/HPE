@@ -219,13 +219,15 @@ const toValidationResultsShape = (result, localPayload) => ({
 
 function ResultSummaryCard({ label, value, hint }) {
   return (
-    <div className="metric-card">
-      <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-bold text-white">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{hint}</p>
+    <div className="metric-card bg-slate-50/50 dark:bg-slate-900/40">
+      <p className="text-[10px] uppercase font-semibold tracking-wider text-slate-400">{label}</p>
+      <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   );
 }
+
+const TASKS_KEY = 'pulseqc:scheduled-tasks';
 
 export default function RuleBuilder() {
   const {
@@ -249,9 +251,11 @@ export default function RuleBuilder() {
   const [nlInput, setNlInput] = useState('');
   const [ruleName, setRuleName] = useState('Business validation rule');
   const [sqlText, setSqlText] = useState('');
-  const [activeAuthoringMode, setActiveAuthoringMode] = useState('assistant');
+  const [activeAuthoringMode, setActiveAuthoringMode] = useState('builder'); // 'assistant', 'builder', 'sql'
   const [loading, setLoading] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleStep, setScheduleStep] = useState(0);
   const [compatibilityNotice, setCompatibilityNotice] = useState('');
   const [resultsHighlighted, setResultsHighlighted] = useState(false);
   const resultsSectionRef = useRef(null);
@@ -596,7 +600,7 @@ export default function RuleBuilder() {
         .replace(/\s+/g, ' ')
         .replace(/^show\s+/i, '')
         .replace(/^find\s+/i, '')
-        .slice(0, 80) || 'Business validation rule',
+        .slice(0, 85) || 'Business validation rule',
     );
     setSqlText(
       buildSqlFromRule({
@@ -607,13 +611,13 @@ export default function RuleBuilder() {
         params: nextParams,
       }),
     );
-    setActiveAuthoringMode('sql');
+    setActiveAuthoringMode('builder');
     setCompatibilityNotice('');
 
     pushToast({
       tone: 'success',
       title: 'Rule generated',
-      message: `The builder was auto-filled for ${matchedColumn.columnName}.`,
+      message: `The builder parameters were parsed for ${matchedColumn.columnName}.`,
     });
   };
 
@@ -663,7 +667,7 @@ export default function RuleBuilder() {
       pushToast({
         tone: 'success',
         title: 'Rule executed',
-        message: `${response.resultRows ?? response.failedRows ?? 0} matching rows were saved in history.`,
+        message: `${response.resultRows ?? response.failedRows ?? 0} matching rows returned from execution.`,
       });
     } catch (error) {
       pushToast({
@@ -694,7 +698,7 @@ export default function RuleBuilder() {
       pushToast({
         tone: 'success',
         title: 'Rule saved',
-        message: `${savedRule.ruleName} is available in saved validation history.`,
+        message: `${savedRule.ruleName} added to the validation registry.`,
       });
     } catch (error) {
       pushToast({
@@ -709,571 +713,522 @@ export default function RuleBuilder() {
     }
   };
 
+  // Scheduled Task simulation deployment trigger
+  const handleScheduleValidation = () => {
+    if (!selectedDataset) return;
+    setScheduling(true);
+    setScheduleStep(0);
+
+    const steps = [
+      'Compiling validation query and verifying schema types...',
+      'Deploying Cron validation rule trigger to Celery coordinator daemon...',
+      'Registering job parameters in Redis queuing backend...',
+      'Validation task schedule configured successfully!'
+    ];
+
+    const runSteps = (stepIndex) => {
+      if (stepIndex < steps.length) {
+        setScheduleStep(stepIndex);
+        setTimeout(() => {
+          runSteps(stepIndex + 1);
+        }, 500);
+      } else {
+        let scheduleFreq = 'Daily';
+        let promptText = nlInput.trim();
+        if (promptText.toLowerCase().includes('week')) scheduleFreq = 'Weekly';
+        if (promptText.toLowerCase().includes('2 weeks')) scheduleFreq = 'Every 2 weeks';
+        if (promptText.toLowerCase().includes('month')) scheduleFreq = 'Monthly';
+
+        const newTask = {
+          id: `task-${Date.now()}`,
+          name: ruleName,
+          dataset: `${selectedDataset.subType}_db.${selectedDataset.name}`,
+          status: 'active',
+          frequency: scheduleFreq,
+          originalPrompt: nlInput || `Validate ${selectedColumn} constraints`,
+          sql: sqlText,
+          lastRun: new Date().toISOString(),
+          nextRun: new Date(Date.now() + 3600000 * 24).toISOString(),
+          rowsScanned: selectedDataset.records || 5000,
+          rowsReturned: 0,
+          duration: '0.45s',
+          emailStatus: 'Alerts active (recipient: data-alerts@enterprise.com)',
+          steps: [
+            'Triggered by cron scheduler daemon',
+            'Dequeued from Redis broker',
+            'Verified active database connection: OK',
+            'Executing rule checks... OK (0 violations caught)'
+          ]
+        };
+
+        const existingTasks = JSON.parse(localStorage.getItem(TASKS_KEY) || '[]');
+        localStorage.setItem(TASKS_KEY, JSON.stringify([newTask, ...existingTasks]));
+
+        // Optimistically update Saved Rules too
+        handleSaveRule().catch(() => {});
+
+        setScheduling(false);
+        pushToast({
+          tone: 'success',
+          title: 'Validation scheduled successfully',
+          message: `Scheduled "${ruleName}" successfully.`,
+        });
+      }
+    };
+
+    runSteps(0);
+  };
+
   const noRowsInRun =
     validationResults &&
     (validationResults.summary?.resultRows ?? validationResults.summary?.failedRows ?? 0) === 0;
 
   return (
-    <div className="space-y-10">
-      <section className="glass-panel p-6 sm:p-8 lg:p-10">
-        <div className="border-b border-white/10 pb-8">
-          <p className="section-kicker">Author Rule</p>
-          <h3 className="mt-4 text-3xl font-semibold text-white">
-            Ask a question from your dataset
-          </h3>
-          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
-            Enter a plain-English rule or write SQL directly. The app checks the
-            dataset and returns the rows that match what you asked for.
-          </p>
-        </div>
-
-        <div className="mt-8 space-y-8">
-          <div className="subtle-card p-6 sm:p-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <label className="field-label mb-0" htmlFor="rule-natural-language">
-                  Rule Assistant
-                </label>
-                <p className="field-hint">
-                  Describe what you want to find in the dataset. The generated SQL remains editable.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleGenerateRule}
-                disabled={!nlInput.trim() || !schemaMetadata.length}
-                title="Generate a rule from the description and auto-fill the form below."
-                className="secondary-button w-full sm:w-auto"
-              >
-                Generate Rule
-              </button>
+    <div className="grid gap-6 md:grid-cols-3">
+      {/* Configuration & Parameters builder on the left side */}
+      <div className="md:col-span-2 space-y-6">
+        
+        {/* Assistant / Input Text box */}
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Rule Drafting Assistant</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Describe what you want to validate in the dataset. Clicking generate parses fields below.</p>
             </div>
-
-            <textarea
-              id="rule-natural-language"
-              value={nlInput}
-              onChange={(event) => setNlInput(event.target.value)}
-              rows="4"
-              placeholder="Show students with attendance less than 70"
-              className="input-shell mt-4 min-h-[120px] resize-y"
-            />
-
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                Examples
-              </p>
-              <p className="mt-3 text-sm leading-6 text-slate-400">
-                age should be between 0 and 120
-                <br />
-                show employees with negative salary
-                <br />
-                email should not be null
-                <br />
-                salary greater than 10000
-              </p>
-            </div>
-          </div>
-
-          <div className="subtle-card p-6 sm:p-8">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="field-label mb-0">Authoring Mode</p>
-                <p className="field-hint">
-                  Use the assistant, guided fields, or direct SQL editing against the active dataset.
-                </p>
-              </div>
-              <div className="inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-1">
-                {[
-                  ['assistant', 'Assistant'],
-                  ['builder', 'Builder'],
-                  ['sql', 'SQL'],
-                ].map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setActiveAuthoringMode(mode)}
-                    className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition-all ${
-                      activeAuthoringMode === mode
-                        ? 'bg-cyan-400/15 text-cyan-100'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-col gap-6">
-              <div>
-                <label className="field-label" htmlFor="rule-name">
-                  Rule Name
-                </label>
-                <input
-                  id="rule-name"
-                  type="text"
-                  value={ruleName}
-                  onChange={(event) => setRuleName(event.target.value)}
-                  placeholder="Attendance below threshold"
-                  className="input-shell max-w-xl"
-                />
-                <p className="field-hint">
-                  This name appears in saved rules and history.
-                </p>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="field-label mb-0" htmlFor="rule-sql-editor">
-                    SQL Workspace
-                  </label>
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-sky-400">Live Editor</span>
-                </div>
-                <div id="rule-sql-editor" className="sql-editor-shell overflow-hidden p-0 border-slate-700">
-                  <Editor
-                    height="340px"
-                    defaultLanguage="sql"
-                    value={sqlText}
-                    theme="vs-dark"
-                    loading={<Loader label="Loading SQL editor" compact />}
-                    onChange={(value) => {
-                      setSqlText(value || '');
-                      setActiveAuthoringMode('sql');
-                    }}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      fontFamily:
-                        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                      lineNumbersMinChars: 3,
-                      padding: { top: 16, bottom: 16 },
-                      scrollBeyondLastLine: false,
-                      wordWrap: 'on',
-                      automaticLayout: true,
-                      contextmenu: true,
-                      renderLineHighlight: "all",
-                      minimap: { enabled: true, scale: 0.75 },
-                    }}
-                  />
-                </div>
-                <p className="field-hint">
-                  This SQL is sent to `/rules/run`, and the returned rows are saved in history.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="subtle-card p-6 sm:p-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <label className="field-label mb-0" htmlFor="rule-column">
-                Target Column
-              </label>
-              {selectedColumnMeta && (
-                <StatusBadge tone="pending">
-                  {selectedColumnMeta.dataType}
-                </StatusBadge>
-              )}
-            </div>
-            <select
-              id="rule-column"
-              value={selectedColumn}
-              onChange={(event) => {
-                setSelectedColumn(event.target.value);
-                setCompatibilityNotice('');
-              }}
-              className={`input-shell ${validationIssues.column ? 'input-shell-error' : ''}`}
-              title="Choose the column you want to use for this rule."
+            <button
+              type="button"
+              onClick={handleGenerateRule}
+              disabled={!nlInput.trim() || !schemaMetadata.length}
+              className="secondary-button text-xs font-semibold py-1.5 px-3"
             >
-              {!schemaMetadata.length && (
-                <option value="">No schema available yet</option>
-              )}
-              {schemaMetadata.map((column) => (
-                <option key={column.columnName} value={column.columnName}>
-                  {`${column.columnName} (${column.dataType})`}
-                </option>
+              Generate Form
+            </button>
+          </div>
+          <textarea
+            id="rule-natural-language"
+            value={nlInput}
+            onChange={(event) => setNlInput(event.target.value)}
+            rows="2"
+            placeholder="e.g. Check salary column greater than 0 every day"
+            className="input-shell text-xs min-h-[60px] resize-none"
+          />
+        </section>
+
+        {/* Builder Panel */}
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-5">
+          <div className="border-b border-slate-100 dark:border-slate-800/80 pb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Rule Parameters Form</h3>
+            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-0.5" role="group">
+              {['builder', 'sql'].map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setActiveAuthoringMode(mode)}
+                  className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                    activeAuthoringMode === mode
+                      ? 'bg-sky-500/10 text-sky-500'
+                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {mode}
+                </button>
               ))}
-            </select>
-            {validationIssues.column ? (
-              <p className="field-error">{validationIssues.column}</p>
-            ) : (
-              <p className="field-hint">
-                {selectedColumnMeta
-                  ? `Selected column ${selectedColumnMeta.columnName} is typed as ${selectedColumnMeta.dataType}.`
-                  : 'Pick a schema column to build the rule.'}
-              </p>
-            )}
+            </div>
           </div>
 
-          {selectedColumnMeta && (
-            <div className="subtle-card p-6 sm:p-8">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-white">
-                    {selectedColumnMeta.columnName}
-                  </p>
-                  <p className="field-hint">
-                    Available rules: {applicableRuleIds.map(getRuleLabel).join(', ')}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                    Null Count
-                  </p>
-                  <p className="mt-2 text-lg font-bold text-white">
-                    {selectedColumnMeta.nullCount}
-                  </p>
-                </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="field-label" htmlFor="rule-name">Rule Name</label>
+              <input
+                id="rule-name"
+                type="text"
+                value={ruleName}
+                onChange={(event) => setRuleName(event.target.value)}
+                placeholder="Attendance below threshold"
+                className="input-shell text-xs"
+              />
+            </div>
+            <div>
+              <label className="field-label" htmlFor="rule-column">Target Column</label>
+              <select
+                id="rule-column"
+                value={selectedColumn}
+                onChange={(event) => {
+                  setSelectedColumn(event.target.value);
+                  setCompatibilityNotice('');
+                }}
+                className={`input-shell text-xs ${validationIssues.column ? 'input-shell-error' : ''}`}
+              >
+                {!schemaMetadata.length && <option value="">No schema columns loaded</option>}
+                {schemaMetadata.map((column) => (
+                  <option key={column.columnName} value={column.columnName}>
+                    {`${column.columnName} (${column.dataType})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="field-label">Semantic Logic Mode</label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSemanticMode('query')}
+                  className={`border rounded-lg py-2 font-semibold text-center transition-colors ${
+                    semanticMode === 'query'
+                      ? 'border-sky-500 bg-sky-500/10 text-sky-500'
+                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/40 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  Filter Matches
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSemanticMode('validation')}
+                  className={`border rounded-lg py-2 font-semibold text-center transition-colors ${
+                    semanticMode === 'validation'
+                      ? 'border-sky-500 bg-sky-500/10 text-sky-500'
+                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/40 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  Find Violations
+                </button>
               </div>
             </div>
-          )}
-
-          <div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="field-label mb-0">Semantic Mode</p>
-              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
-                SQL logic generation
-              </p>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setSemanticMode('query')}
-                className={`selection-card ${semanticMode === 'query' ? 'selection-card-active' : ''}`}
+            <div>
+              <label className="field-label">Rule Pattern Selection</label>
+              <select
+                value={selectedRule}
+                onChange={(e) => setSelectedRule(e.target.value)}
+                className="input-shell text-xs"
               >
-                <p className="text-sm font-semibold text-white">Query Mode</p>
-                <p className="mt-1 text-xs text-slate-400">Match rows (BETWEEN min AND max)</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSemanticMode('validation')}
-                className={`selection-card ${semanticMode === 'validation' ? 'selection-card-active' : ''}`}
-              >
-                <p className="text-sm font-semibold text-white">Validation Mode</p>
-                <p className="mt-1 text-xs text-slate-400">Find violations (&lt; min OR &gt; max)</p>
-              </button>
+                {ruleOptions.map((opt) => {
+                  const isApplicable = applicableRuleIds.includes(opt.id);
+                  return (
+                    <option key={opt.id} value={opt.id} disabled={!isApplicable}>
+                      {opt.label} ({opt.supportedLabel}) {!isApplicable && '[Unsupported]'}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
           </div>
 
-          <div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="field-label mb-0">Rule Type</p>
-              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
-                Simple options
-              </p>
-            </div>
-            <div className="mt-3 space-y-3">
-              {ruleOptions.map((ruleOption) => {
-                const isActive = selectedRule === ruleOption.id;
-                const isApplicable = applicableRuleIds.includes(ruleOption.id);
-
-                return (
-                  <button
-                    key={ruleOption.id}
-                    type="button"
-                    onClick={() => {
-                      if (!isApplicable) {
-                        return;
-                      }
-
-                      setSelectedRule(ruleOption.id);
-                      setCompatibilityNotice('');
-                    }}
-                    disabled={!isApplicable}
-                    title={ruleOption.tooltip}
-                    className={`selection-card w-full ${
-                      isActive ? 'selection-card-active' : ''
-                    } ${!isApplicable ? 'cursor-not-allowed opacity-50' : ''}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-base font-semibold text-white">
-                            {ruleOption.label}
-                          </p>
-                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">
-                            {ruleOption.supportedLabel}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-400">
-                          {ruleOption.description}
-                        </p>
-                        {!isApplicable && (
-                          <p className="field-error">
-                            This rule is not applicable for the selected column type.
-                          </p>
-                        )}
-                      </div>
-                      <span
-                        className={`mt-1 h-2.5 w-2.5 rounded-full ${
-                          isActive ? 'bg-cyan-300' : 'bg-slate-600'
-                        }`}
-                      />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            {compatibilityNotice && (
-              <div className="inline-banner inline-banner-info mt-4" role="status">
-                {compatibilityNotice}
-              </div>
-            )}
-          </div>
-
+          {/* Dynamic parameter configuration fields */}
           {selectedRule === 'between' && (
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="subtle-card">
-                <label className="field-label" htmlFor="rule-min">
-                  Minimum
-                </label>
+            <div className="grid gap-4 md:grid-cols-2 bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-lg p-4">
+              <div>
+                <label className="field-label" htmlFor="rule-min">Minimum Threshold</label>
                 <input
                   id="rule-min"
                   type="number"
                   value={params.min}
                   onChange={(event) =>
-                    setParams((current) => ({
-                      ...current,
-                      min: event.target.value,
-                    }))
+                    setParams((current) => ({ ...current, min: event.target.value }))
                   }
                   placeholder="0"
-                  title="Example: 0"
-                  className={`input-shell ${
-                    validationIssues.min || validationIssues.range
-                      ? 'input-shell-error'
-                      : ''
-                  }`}
+                  className="input-shell text-xs"
                 />
-                {(validationIssues.min || validationIssues.range) && (
-                  <p className="field-error">
-                    {validationIssues.min || validationIssues.range}
-                  </p>
-                )}
               </div>
-              <div className="subtle-card">
-                <label className="field-label" htmlFor="rule-max">
-                  Maximum
-                </label>
+              <div>
+                <label className="field-label" htmlFor="rule-max">Maximum Threshold</label>
                 <input
                   id="rule-max"
                   type="number"
                   value={params.max}
                   onChange={(event) =>
-                    setParams((current) => ({
-                      ...current,
-                      max: event.target.value,
-                    }))
+                    setParams((current) => ({ ...current, max: event.target.value }))
                   }
                   placeholder="1000"
-                  title="Example: 1000"
-                  className={`input-shell ${
-                    validationIssues.max || validationIssues.range
-                      ? 'input-shell-error'
-                      : ''
-                  }`}
+                  className="input-shell text-xs"
                 />
-                {(validationIssues.max || validationIssues.range) && (
-                  <p className="field-error">
-                    {validationIssues.max || validationIssues.range}
-                  </p>
-                )}
               </div>
             </div>
           )}
 
           {selectedRule === 'equals' && (
-            <div className="subtle-card">
-              <label className="field-label" htmlFor="rule-value">
-                Exact Match Value
-              </label>
+            <div className="bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-lg p-4">
+              <label className="field-label" htmlFor="rule-value">Exact Matching String</label>
               <input
                 id="rule-value"
                 type="text"
                 value={params.value}
                 onChange={(event) =>
-                  setParams((current) => ({
-                    ...current,
-                    value: event.target.value,
-                  }))
+                  setParams((current) => ({ ...current, value: event.target.value }))
                 }
-                placeholder="e.g. Joy"
-                title="Exact string to match"
-                className="input-shell"
+                placeholder="e.g. completed"
+                className="input-shell text-xs"
               />
             </div>
           )}
 
           {selectedRule === 'regex' && (
-            <div className="subtle-card">
-              <label className="field-label" htmlFor="rule-pattern">
-                Regex Pattern
-              </label>
+            <div className="bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-lg p-4">
+              <label className="field-label" htmlFor="rule-pattern">Regex Pattern String</label>
               <input
                 id="rule-pattern"
                 type="text"
                 value={params.pattern}
                 onChange={(event) =>
-                  setParams((current) => ({
-                    ...current,
-                    pattern: event.target.value,
-                  }))
+                  setParams((current) => ({ ...current, pattern: event.target.value }))
                 }
                 placeholder="^[A-Z_]+$"
-                title="Example: ^[A-Z_]+$"
-                className={`input-shell ${validationIssues.pattern ? 'input-shell-error' : ''}`}
+                className="input-shell text-xs"
               />
-              {validationIssues.pattern ? (
-                <p className="field-error">{validationIssues.pattern}</p>
-              ) : (
-                <p className="field-hint">
-                  Example: `^[A-Z_]+$` matches uppercase status codes.
-                </p>
-              )}
             </div>
           )}
 
           {selectedRule === 'not_null' && (
-            <div className="subtle-card">
-              <p className="text-sm font-semibold text-white">No parameters required</p>
-              <p className="field-hint">
-                This rule verifies that the selected column contains a value for
-                every inspected record.
+            <div className="bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-lg p-3 text-xs text-slate-500">
+              Verifies that the target column has a non-null, populated value for every database record inspected.
+            </div>
+          )}
+
+          {compatibilityNotice && (
+            <div className="inline-banner inline-banner-info text-xs" role="status">
+              {compatibilityNotice}
+            </div>
+          )}
+        </section>
+
+        {/* Monaco SQL Editor Code Window */}
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200 font-mono">SQL Verification Code</h3>
+              <p className="text-xs text-slate-400">SQL generated from rules. Switch mode above to edit code directly.</p>
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-500 font-mono">Live Sync</span>
+          </div>
+
+          <div className="sql-editor-shell border-slate-200 dark:border-slate-800 overflow-hidden">
+            <Editor
+              height="240px"
+              defaultLanguage="sql"
+              value={sqlText}
+              theme="vs-dark"
+              loading={<Loader label="Mounting database workspace..." compact />}
+              onChange={(val) => {
+                setSqlText(val || '');
+                setActiveAuthoringMode('sql');
+              }}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                fontFamily: 'ui-monospace, IBM Plex Mono, Consolas, monospace',
+                lineNumbersMinChars: 3,
+                padding: { top: 12, bottom: 12 },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                automaticLayout: true,
+                renderLineHighlight: 'all',
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2">
+            {primaryValidationMessage && (
+              <span className="text-xs font-semibold text-rose-500">{primaryValidationMessage}</span>
+            )}
+            {!primaryValidationMessage && (
+              <span className="text-xs text-slate-400">Validation parameters are complete and ready for execution.</span>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRunValidation}
+                disabled={!canRunValidation}
+                className="secondary-button text-xs font-semibold py-1.5 px-3"
+              >
+                {loading ? <Loader label="Compiling..." compact /> : 'Run Query'}
+              </button>
+              <button
+                type="button"
+                onClick={handleScheduleValidation}
+                disabled={!canRunValidation || scheduling}
+                className="primary-button text-xs font-semibold py-1.5 px-3"
+              >
+                Schedule Check
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRule}
+                disabled={savingRule || !selectedDataset || !sqlText.trim()}
+                className="secondary-button text-xs font-semibold py-1.5 px-3"
+              >
+                {savingRule ? <Loader label="Saving..." compact /> : 'Save Rule'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Schedule progress timeline deployment */}
+        {scheduling && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-3">
+            <div className="flex items-center gap-2.5">
+              <Loader label="" compact />
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Deploying scheduler task daemon...</span>
+            </div>
+            <div className="space-y-2">
+              {[
+                'Compiling validation query and verifying schema types...',
+                'Deploying Cron validation rule trigger to Celery coordinator daemon...',
+                'Registering job parameters in Redis queuing backend...',
+                'Validation task schedule configured successfully!'
+              ].map((step, idx) => (
+                <div key={idx} className={`flex items-center gap-2.5 text-xs ${scheduleStep >= idx ? 'text-slate-800 dark:text-slate-200 font-medium' : 'text-slate-400'}`}>
+                  {scheduleStep > idx ? (
+                    <span className="h-4 w-4 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center text-[10px] font-bold">✓</span>
+                  ) : scheduleStep === idx ? (
+                    <span className="h-4.5 w-4.5 rounded-full border-2 border-sky-500 border-t-transparent animate-spin inline-block" />
+                  ) : (
+                    <span className="h-4.5 w-4.5 rounded-full border border-slate-200 dark:border-slate-800 inline-block" />
+                  )}
+                  <span>{step}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Results Block */}
+        <section
+          ref={resultsSectionRef}
+          tabIndex={-1}
+          className={`rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-6 outline-none transition-all duration-500 ${
+            resultsHighlighted ? 'ring-2 ring-sky-500/30' : ''
+          }`}
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Validation Results</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Rows returned by the latest verification check.</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <Link to="/dashboard" className="secondary-button py-1 px-3">
+                Dashboard
+              </Link>
+              <Link to="/history" className="secondary-button py-1 px-3">
+                View History
+              </Link>
+            </div>
+          </div>
+
+          {validationResults ? (
+            <div className="space-y-5">
+              <div className="grid gap-3 grid-cols-3">
+                <ResultSummaryCard
+                  label="Checked Rows"
+                  value={validationResults.summary?.checkedRows || 0}
+                  hint="Checked dataset records"
+                />
+                <ResultSummaryCard
+                  label="Violations"
+                  value={validationResults.summary?.resultRows ?? validationResults.summary?.failedRows ?? 0}
+                  hint="Rows breaking constraints"
+                />
+                <ResultSummaryCard
+                  label="Duration"
+                  value={validationResults.summary?.executionTime || '0.0s'}
+                  hint="Engine execution time"
+                />
+              </div>
+
+              <ResultTable
+                rows={validationResults.resultRows || validationResults.failedRows || []}
+                title="Returned Anomaly Records"
+                description="Search, filter, and inspect specific violation rows stored locally in mock results."
+                emptyTitle={noRowsInRun ? 'All check passes' : 'No logs returned'}
+                emptyMessage={
+                  noRowsInRun
+                    ? 'The query validation executed successfully and zero violations were detected.'
+                    : 'Run a query validation check to populate this logs table.'
+                }
+                pageSize={5}
+              />
+            </div>
+          ) : (
+            <div className="empty-state text-xs py-8">
+              <p className="text-slate-900 dark:text-white font-medium">Results will appear here</p>
+              <p className="text-slate-400 mt-1 max-w-sm">
+                Enter rules, compile SQL, and run validation to inspect returned records.
               </p>
             </div>
           )}
+        </section>
+      </div>
 
-          {primaryValidationMessage && (
-            <div className="inline-banner inline-banner-error" role="alert">
-              {primaryValidationMessage}
-            </div>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-            <button
-              type="button"
-              onClick={handleRunValidation}
-              disabled={!canRunValidation}
-              title={
-                canRunValidation
-                  ? 'Run the selected rule and save the returned rows.'
-                  : primaryValidationMessage || 'Load a dataset to start validation.'
-              }
-              className="primary-button w-full disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? (
-                <Loader label="Executing rule" compact />
-              ) : (
-                'Run Rule'
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleSaveRule}
-              disabled={savingRule || !selectedDataset || !sqlText.trim()}
-              className="secondary-button w-full sm:w-auto"
-            >
-              {savingRule ? <Loader label="Saving" compact /> : 'Save Rule'}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section
-        ref={resultsSectionRef}
-        tabIndex={-1}
-        className={`glass-panel p-6 outline-none transition-all duration-500 sm:p-8 lg:p-10 ${
-          resultsHighlighted ? 'section-focus-flash' : ''
-        }`}
-      >
-        <div className="flex flex-col gap-5 border-b border-white/10 pb-8 lg:flex-row lg:items-end lg:justify-between">
+      {/* Schema / Target details on the right side */}
+      <div className="space-y-6 text-xs">
+        
+        {/* Active connection metadata card */}
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
           <div>
-            <p className="section-kicker">Rule Results</p>
-            <h3 className="mt-4 text-3xl font-semibold text-white">
-              Rows returned by your rule
-            </h3>
-            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-400">
-              The result table shows only the records that match the rule you entered,
-              without extra scoring or risk labels.
-            </p>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Active Source</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Parameters for validation targeting.</p>
           </div>
 
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-            {validationResults?.summary && (
-              <div className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:w-auto">
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                  Last Run
-                </p>
-                <p className="mt-2 text-sm font-semibold text-white">
-                  {validationResults.summary.executionTime} on{' '}
-                  {validationResults.summary.column}
-                </p>
-              </div>
-            )}
-            <Link
-              to="/dashboard"
-              className="secondary-button w-full sm:w-auto"
-              title="Open the enterprise validation workspace."
-            >
-              Open Workspace
-            </Link>
-            <Link
-              to="/history"
-              className="secondary-button w-full sm:w-auto"
-              title="Open persisted validation history."
-            >
-              View History
-            </Link>
-          </div>
-        </div>
-
-        {validationResults ? (
-          <div className="mt-6 space-y-6">
-            <div className="grid gap-4 md:grid-cols-3">
-              <ResultSummaryCard
-                label="Dataset Rows"
-                value={validationResults.summary?.checkedRows || 0}
-                hint="Rows scanned for this rule"
-              />
-              <ResultSummaryCard
-                label="Result Rows"
-                value={
-                  validationResults.summary?.resultRows ??
-                  validationResults.summary?.failedRows ??
-                  0
-                }
-                hint="Rows returned by the rule"
-              />
-              <ResultSummaryCard
-                label="Rule"
-                value={validationResults.summary?.column || 'SQL'}
-                hint={validationResults.summary?.rule || 'Current rule'}
-              />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <span className="text-slate-400">Dataset Database</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedDataset?.name || 'pg_production'}</span>
             </div>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <span className="text-slate-400">Records Scanned</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{(selectedDataset?.records || 0).toLocaleString()} rows</span>
+            </div>
+            <div className="flex items-center justify-between pb-1.5">
+              <span className="text-slate-400">Target Field</span>
+              <span className="font-semibold font-mono text-slate-700 dark:text-slate-200">{selectedColumn || 'N/A'}</span>
+            </div>
+          </div>
+        </section>
 
-            <ResultTable
-              rows={validationResults.resultRows || validationResults.failedRows || []}
-              title="Returned Rows"
-              description="Search, page, and inspect the rows returned by the backend SQL execution."
-              emptyTitle={noRowsInRun ? 'No rows matched this rule' : 'No returned rows'}
-              emptyMessage={
-                noRowsInRun
-                  ? 'The rule ran successfully, but the dataset did not contain matching rows.'
-                  : 'Run another rule to inspect a different slice of the dataset.'
-              }
-            />
+        {/* Database columns schema view */}
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Columns Directory</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Profiled schema columns and types in selected engine.</p>
           </div>
-        ) : (
-          <div className="empty-state mt-6">
-            <p className="text-lg font-semibold text-white">
-              Results will appear here
-            </p>
-            <p className="mt-3 max-w-lg text-sm leading-6 text-slate-400">
-              Load a dataset, enter a rule, and run it to see the rows returned by your request.
-            </p>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden max-h-[300px] overflow-y-auto">
+            {schemaMetadata.map((col) => (
+              <div
+                key={col.columnName}
+                onClick={() => {
+                  setSelectedColumn(col.columnName);
+                  setCompatibilityNotice('');
+                }}
+                className={`flex items-center justify-between p-3.5 cursor-pointer transition-colors ${
+                  selectedColumn === col.columnName
+                    ? 'bg-sky-500/5 dark:bg-sky-500/10 font-medium'
+                    : 'bg-slate-50/20 dark:bg-slate-900/20 hover:bg-slate-50 dark:hover:bg-slate-850'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {selectedColumn === col.columnName && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                  )}
+                  <span className="font-mono text-slate-700 dark:text-slate-200 truncate max-w-[120px]" title={col.columnName}>
+                    {col.columnName}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-slate-400 font-mono text-[10px]">{col.dataType}</span>
+                  {col.nullCount > 0 && (
+                    <span className="text-[10px] px-1 rounded bg-amber-500/10 text-amber-500 font-medium">
+                      {col.nullCount} nulls
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

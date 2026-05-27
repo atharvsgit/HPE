@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
@@ -9,23 +10,10 @@ export default {
         cyan: {
           450: '#38bdf8',
           550: '#0891b2',
-        },
-        emerald: {
-          450: '#34d399',
-        },
-        rose: {
-          450: '#fb7185',
-        },
       },
-      fontFamily: {
-        sans: ['IBM Plex Sans', 'Segoe UI', 'sans-serif'],
-        display: ['Sora', 'IBM Plex Sans', 'sans-serif'],
       },
       boxShadow: {
         glow: '0 0 0 1px rgba(56, 189, 248, 0.15), 0 22px 70px rgba(8, 145, 178, 0.18)',
-      },
-      backgroundImage: {
-        mesh: 'radial-gradient(circle at 15% 20%, rgba(34, 211, 238, 0.18), transparent 28%), radial-gradient(circle at 85% 0%, rgba(251, 113, 133, 0.14), transparent 24%), linear-gradient(140deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 1))',
       },
       keyframes: {
         float: {
