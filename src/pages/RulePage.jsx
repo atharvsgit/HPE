@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import StatusBadge from '../components/common/StatusBadge';
 import RuleBuilder from '../components/ruleBuilder/RuleBuilder';
 import { useDataset } from '../context/DatasetContext';
 
 const CONNECTIONS_KEY = 'pulseqc:db-connections';
+const TASKS_KEY = 'pulseqc:scheduled-tasks';
 
 // Seed database datasets mapping
 const mockDatabaseConfigs = {
@@ -92,6 +93,7 @@ const initialConnections = [
 export default function RulePage() {
   const { selectedDataset, replaceDataset, pushToast } = useDataset();
   const [connections, setConnections] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newConnName, setNewConnName] = useState('');
   const [newConnType, setNewConnType] = useState('postgresql');
@@ -109,12 +111,21 @@ export default function RulePage() {
       localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(initialConnections));
     }
 
-    // Set the initial active dataset in context if none is loaded
+    const storedTasks = localStorage.getItem(TASKS_KEY);
+    if (storedTasks) {
+      setTasks(JSON.parse(storedTasks));
+    }
+
     const active = currentConnections.find((c) => c.isActive && c.status === 'connected');
     if (active && !selectedDataset) {
       const config = mockDatabaseConfigs[active.name];
       if (config) {
-        replaceDataset(config);
+        const { schema, rows, ...datasetMeta } = config;
+        replaceDataset({
+          dataset: datasetMeta,
+          schema: schema || [],
+          rows: rows || []
+        });
       }
     }
   }, [replaceDataset, selectedDataset]);
@@ -137,14 +148,18 @@ export default function RulePage() {
     setConnections(updated);
     localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(updated));
 
-    // Load mock configuration schema into global context
     const config = mockDatabaseConfigs[name];
     if (config) {
-      replaceDataset(config);
+      const { schema, rows, ...datasetMeta } = config;
+      replaceDataset({
+        dataset: datasetMeta,
+        schema: schema || [],
+        rows: rows || []
+      });
       pushToast({
         tone: 'success',
-        title: 'Active Database Switched',
-        message: `Now targeting "${name}" for schema and query rules.`,
+        title: 'Context Switched',
+        message: `Now targeting "${name}" for query validation.`,
       });
     }
   };
@@ -167,7 +182,7 @@ export default function RulePage() {
     pushToast({
       tone: 'info',
       title: 'Database Disconnected',
-      message: `Successfully disconnected "${name}".`,
+      message: `Disconnected database connector for "${name}".`,
     });
   };
 
@@ -184,8 +199,25 @@ export default function RulePage() {
 
     pushToast({
       tone: 'success',
-      title: 'Database Connected',
-      message: `Connection re-established with "${name}".`,
+      title: 'Database Reconnected',
+      message: `Database connection re-established with "${name}".`,
+    });
+  };
+
+  const handleDeleteConnection = (name, e) => {
+    e.stopPropagation();
+    const updated = connections.filter((c) => c.name !== name);
+    setConnections(updated);
+    localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(updated));
+
+    if (selectedDataset?.name === name) {
+      replaceDataset(null);
+    }
+
+    pushToast({
+      tone: 'info',
+      title: 'Connection Deleted',
+      message: `Connection metadata for "${name}" has been deleted.`,
     });
   };
 
@@ -203,7 +235,6 @@ export default function RulePage() {
         isActive: false
       };
 
-      // Register mock schema mapping
       mockDatabaseConfigs[formattedName] = {
         id: `db-custom-${Date.now()}`,
         name: formattedName,
@@ -230,33 +261,43 @@ export default function RulePage() {
 
       pushToast({
         tone: 'success',
-        title: 'Connection Created',
-        message: `Registered connection for "${formattedName}" successfully.`
+        title: 'Connection Configured',
+        message: `Registered database connection for "${formattedName}".`
       });
     }, 800);
   };
 
+  // Get active schedule counts dynamically per DB connector
+  const connectionsWithSchedules = useMemo(() => {
+    return connections.map((conn) => {
+      const activeCount = tasks.filter(
+        (t) => t.dataset.includes(conn.name) && t.status === 'active'
+      ).length;
+      return { ...conn, activeCount };
+    });
+  }, [connections, tasks]);
+
   return (
-    <div className="space-y-8 animate-slide-up">
-      {/* Page Title */}
+    <div className="space-y-6 animate-slide-up">
+      {/* Title */}
       <div>
         <p className="section-kicker">Data Quality Workspace</p>
-        <h2 className="text-3xl font-semibold text-slate-900 dark:text-white mt-1">Rule Workspace</h2>
-        <p className="text-sm text-slate-500 mt-2">
-          Manage database connections, switch contexts, and schedule business rules with our smart natural language interface.
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">Rule Workspace</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Manage database connections and schedule business validation rules.
         </p>
       </div>
 
       {/* Database Connection Hub */}
-      <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
+      <section className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Database Connection Hub</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Switch active database or disconnect connectors.</p>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Database Connection Registry</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Define multi-database connections and switch active context.</p>
           </div>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="secondary-button text-xs font-semibold flex items-center gap-1.5 py-1.5 px-3"
+            className="secondary-button text-xs font-semibold flex items-center gap-1.5 py-1 px-2.5"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -266,44 +307,61 @@ export default function RulePage() {
         </div>
 
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {connections.map((c) => (
+          {connectionsWithSchedules.map((c) => (
             <div
               key={c.name}
               onClick={() => handleSwitchDatabase(c.name)}
-              className={`rounded-lg border p-4 cursor-pointer text-left transition-all duration-200 flex flex-col justify-between min-h-[110px] ${
+              className={`rounded-lg border p-4 cursor-pointer text-left transition-all duration-150 flex flex-col justify-between min-h-[110px] ${
                 c.isActive
                   ? 'border-sky-500 bg-sky-50/20 dark:bg-sky-500/10'
-                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 hover:border-slate-300 dark:hover:border-slate-700'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 hover:border-slate-350 dark:hover:border-slate-700'
               }`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{c.type}</span>
-                <span className={`inline-block h-2 w-2 rounded-full ${c.status === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                <span className={`inline-block h-2 w-2 rounded-full ${c.status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
               </div>
-              <div className="mt-2.5">
+              <div className="mt-2">
                 <h4 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">{c.activeCount} active schedules</p>
               </div>
               <div className="mt-3 flex items-center justify-between text-xs" onClick={(e) => e.stopPropagation()}>
                 {c.isActive ? (
-                  <span className="font-semibold text-sky-600 dark:text-sky-400">Active</span>
-                ) : (
-                  <span className="text-slate-400">Inactive</span>
-                )}
-                {c.status === 'connected' ? (
-                  <button
-                    onClick={(e) => handleDisconnect(c.name, e)}
-                    className="text-slate-500 hover:text-rose-500 font-semibold"
-                  >
-                    Disconnect
-                  </button>
+                  <span className="font-semibold text-sky-600 dark:text-sky-400">Active Context</span>
                 ) : (
                   <button
-                    onClick={(e) => handleConnect(c.name, e)}
-                    className="text-sky-500 hover:text-sky-400 font-semibold"
+                    onClick={() => handleSwitchDatabase(c.name)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-semibold"
                   >
-                    Connect
+                    Switch Context
                   </button>
                 )}
+                <div className="flex items-center gap-2">
+                  {c.status === 'connected' ? (
+                    <button
+                      onClick={(e) => handleDisconnect(c.name, e)}
+                      className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold"
+                    >
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => handleConnect(c.name, e)}
+                      className="text-sky-500 hover:text-sky-400 font-semibold"
+                    >
+                      Connect
+                    </button>
+                  )}
+                  {!c.isActive && (
+                    <button
+                      onClick={(e) => handleDeleteConnection(c.name, e)}
+                      className="text-rose-450 hover:text-rose-500 font-semibold"
+                      title="Delete connection metadata"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -313,22 +371,22 @@ export default function RulePage() {
       {/* Connection Modal Overlay */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full space-y-4 shadow-xl">
-            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Connect New Database</h3>
+          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-5 max-w-sm w-full space-y-4 shadow-xl">
+            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
+              <h3 className="text-xs font-semibold text-slate-950 dark:text-white uppercase tracking-wider">Connect New Database</h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-200"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            <form onSubmit={handleCreateConnection} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateConnection} className="space-y-3.5 text-xs">
               <div>
-                <label className="field-label" htmlFor="new-conn-name">Connection Name</label>
+                <label className="field-label" htmlFor="new-conn-name">Connection Label</label>
                 <input
                   id="new-conn-name"
                   type="text"
@@ -341,7 +399,7 @@ export default function RulePage() {
               </div>
 
               <div>
-                <label className="field-label" htmlFor="new-conn-type">Database Engine</label>
+                <label className="field-label" htmlFor="new-conn-type">Database Engine Type</label>
                 <select
                   id="new-conn-type"
                   value={newConnType}
@@ -356,13 +414,13 @@ export default function RulePage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="field-label" htmlFor="new-conn-host">Host Address</label>
                   <input
                     id="new-conn-host"
                     type="text"
-                    placeholder="localhost"
+                    placeholder="127.0.0.1"
                     className="input-shell text-xs"
                   />
                 </div>
@@ -377,7 +435,7 @@ export default function RulePage() {
                 </div>
               </div>
 
-              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 flex gap-2 justify-end">
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex gap-2 justify-end">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

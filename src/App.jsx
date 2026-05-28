@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { NavLink, Outlet, Route, Routes, Navigate } from 'react-router-dom';
 import Loader from './components/common/Loader';
-import StatusBadge from './components/common/StatusBadge';
 import Toast from './components/common/Toast';
 import ThemeToggle from './components/common/ThemeToggle';
 import { useDataset } from './context/DatasetContext';
@@ -15,24 +14,23 @@ const navigation = [
   {
     path: '/dashboard',
     label: 'Dashboard',
-    description: 'Active scheduled tasks and orchestration activity.',
+    description: 'Validation schedules and operations feed.',
   },
   {
     path: '/rules',
     label: 'Rule Workspace',
-    description: 'Connect databases and author business rules.',
+    description: 'Connect databases and schedule business rules.',
   },
   {
     path: '/history',
     label: 'Validation History',
-    description: 'Searchable timeline logs and audit logs.',
+    description: 'Timeline audit logs and execution records.',
   },
 ];
 
 export function AppShell() {
   const {
     selectedDataset,
-    schemaMetadata,
     toasts,
     dismissToast,
     pushToast,
@@ -41,18 +39,18 @@ export function AppShell() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [backendStatus, setBackendStatus] = useState('checking'); // checking | online | offline
   const [retrying, setRetrying] = useState(false);
+  const [activeSchedulesCount, setActiveSchedulesCount] = useState(0);
 
   const checkBackendHealth = async (showSuccess = false) => {
     try {
       if (showSuccess) setRetrying(true);
-      // Attempt to hit the rules endpoint with a small timeout override
       await api.get('/rules', { timeout: 3000 });
       setBackendStatus('online');
       if (showSuccess) {
         pushToast({
           tone: 'success',
           title: 'Backend connected',
-          message: 'Real-time orchestration and execution APIs are now online.',
+          message: 'Validation scheduling APIs are now online.',
         });
       }
     } catch (error) {
@@ -61,24 +59,46 @@ export function AppShell() {
         pushToast({
           tone: 'error',
           title: 'Connection failed',
-          message: 'The backend server on port 8000 is still unreachable.',
+          message: 'The backend validation server is still unreachable.',
         });
       }
     } finally {
-      setRetrying(false);
+      if (showSuccess) setRetrying(false);
+    }
+  };
+
+  const updateScheduleCount = () => {
+    try {
+      const stored = localStorage.getItem('pulseqc:scheduled-tasks');
+      if (stored) {
+        const tasks = JSON.parse(stored);
+        const activeCount = tasks.filter((t) => t.status === 'active').length;
+        setActiveSchedulesCount(activeCount);
+      } else {
+        setActiveSchedulesCount(2); // default seed active schedules count
+      }
+    } catch {
+      setActiveSchedulesCount(0);
     }
   };
 
   useEffect(() => {
-    // Initial check
     checkBackendHealth();
+    updateScheduleCount();
 
-    // Regular interval poll every 20 seconds
     const interval = setInterval(() => {
       checkBackendHealth();
     }, 20000);
 
-    return () => clearInterval(interval);
+    // Watch for task additions / updates
+    window.addEventListener('storage', updateScheduleCount);
+    const localCheck = setInterval(updateScheduleCount, 2500);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(localCheck);
+      window.removeEventListener('storage', updateScheduleCount);
+    };
   }, []);
 
   return (
@@ -88,7 +108,7 @@ export function AppShell() {
         <div className="flex items-center gap-2">
           <span className="font-semibold tracking-tight text-slate-900 dark:text-slate-100">DVC Platform</span>
           {backendStatus === 'offline' && (
-            <span className="h-2.5 w-2.5 rounded-full bg-amber-500" title="Running in simulated mode" />
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -108,21 +128,21 @@ export function AppShell() {
       <aside
         className={`${
           isSidebarOpen ? 'flex' : 'hidden'
-        } md:flex flex-col w-full md:w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 shrink-0 p-5 md:h-screen md:sticky md:top-0`}
+        } md:flex flex-col w-full md:w-60 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 shrink-0 p-4 md:h-screen md:sticky md:top-0`}
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-600 font-bold text-white text-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-slate-950 font-bold text-white text-xs dark:bg-white dark:text-slate-950">
               DVC
             </div>
             <div>
-              <h1 className="text-sm font-semibold text-slate-900 dark:text-white leading-tight">Data Quality</h1>
-              <p className="text-[10px] text-slate-400 font-medium tracking-wide">ENTERPRISE PLATFORM</p>
+              <h1 className="text-xs font-semibold text-slate-900 dark:text-white leading-tight">Data Quality</h1>
+              <p className="text-[9px] text-slate-400 font-medium tracking-wide">ENTERPRISE VALIDATION</p>
             </div>
           </div>
           <button
             onClick={() => setIsSidebarOpen(false)}
-            className="hidden max-md:block p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+            className="hidden max-md:block p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -130,7 +150,7 @@ export function AppShell() {
           </button>
         </div>
 
-        <nav className="mt-8 space-y-1 flex-1">
+        <nav className="mt-6 space-y-1 flex-1">
           {navigation.map((item) => (
             <NavLink
               key={item.path}
@@ -140,8 +160,8 @@ export function AppShell() {
               }
             >
               <div className="flex flex-col text-left">
-                <span className="text-sm font-semibold">{item.label}</span>
-                <span className="text-[11px] font-normal text-slate-400 mt-0.5 line-clamp-1">
+                <span className="text-xs font-semibold">{item.label}</span>
+                <span className="text-[10px] font-normal text-slate-400 mt-0.5 line-clamp-1">
                   {item.description}
                 </span>
               </div>
@@ -150,17 +170,12 @@ export function AppShell() {
         </nav>
 
         {/* Sidebar Footer info */}
-        <div className="border-t border-slate-200 dark:border-slate-800 pt-5 mt-auto space-y-4">
-          <div className="rounded-lg bg-slate-50 dark:bg-slate-900/80 p-3.5 border border-slate-200 dark:border-slate-800/80">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest block">Active Dataset</span>
-            <span className="text-sm font-semibold text-slate-800 dark:text-white mt-1.5 block truncate">
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4 mt-auto">
+          <div className="rounded bg-slate-50 dark:bg-slate-900 p-3 border border-slate-200 dark:border-slate-800">
+            <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest block">Active Dataset</span>
+            <span className="text-xs font-semibold text-slate-800 dark:text-white mt-1 block truncate">
               {selectedDataset?.name || 'None Connected'}
             </span>
-            {selectedDataset && (
-              <span className="text-xs text-slate-500 mt-1 block capitalize">
-                {selectedDataset.sourceType} via {selectedDataset.subType}
-              </span>
-            )}
           </div>
         </div>
       </aside>
@@ -168,74 +183,87 @@ export function AppShell() {
       {/* Main content workspace */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar header */}
-        <header className="hidden md:flex items-center justify-between h-14 px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30">
-          <div className="flex items-center gap-2">
+        <header className="hidden md:flex items-center justify-between h-12 px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30">
+          {/* Breadcrumbs and Context info */}
+          <div className="flex items-center gap-4 text-xs">
             <button
               onClick={() => setIsSidebarOpen((prev) => !prev)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 mr-2 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
               title="Toggle sidebar"
             >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h7" />
               </svg>
             </button>
-            <span className="text-xs text-slate-400">Workspace / Platform Console</span>
+            
+            <div className="flex items-center gap-1.5 text-slate-400 font-medium">
+              <span>Platform</span>
+              <span className="text-slate-300 dark:text-slate-700">/</span>
+              <span className="text-slate-600 dark:text-slate-300 font-semibold">Enterprise Validation Hub</span>
+            </div>
+
+            <div className="h-3 w-px bg-slate-200 dark:bg-slate-800" />
+
+            <div className="flex items-center gap-3 text-[11px] text-slate-500">
+              <span>
+                <strong className="text-slate-400 dark:text-slate-600">Active Source:</strong>{' '}
+                <span className="text-slate-600 dark:text-slate-300 font-semibold">
+                  {selectedDataset?.name || 'None'}
+                </span>
+              </span>
+              <span>•</span>
+              <span>
+                <strong className="text-slate-400 dark:text-slate-600">Schedules:</strong>{' '}
+                <span className="text-slate-600 dark:text-slate-300 font-semibold">{activeSchedulesCount} Active</span>
+              </span>
+              <span>•</span>
+              <span>
+                <strong className="text-slate-400 dark:text-slate-600">Sessions:</strong>{' '}
+                <span className="text-slate-600 dark:text-slate-300 font-semibold">2 Active</span>
+              </span>
+              <span>•</span>
+              <span>
+                <strong className="text-slate-400 dark:text-slate-600">Engine:</strong>{' '}
+                <span className="text-emerald-500 font-semibold">Idle</span>
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* Backend Health Badge */}
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Redesigned Subtle Connection Badge */}
+            <div className="flex items-center gap-2 text-xs">
               {backendStatus === 'online' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-medium text-slate-500">API Connected</span>
+                <div className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <span className="text-[11px] text-slate-400 font-medium">Online</span>
                 </div>
               ) : backendStatus === 'offline' ? (
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                    <span className="text-[11px] font-semibold text-amber-500 uppercase">Simulated Mode</span>
-                  </div>
                   <button
                     onClick={() => checkBackendHealth(true)}
                     disabled={retrying}
-                    className="text-xs font-semibold text-sky-500 hover:text-sky-400 disabled:opacity-50"
+                    className="text-[11px] font-semibold text-sky-500 hover:text-sky-400 disabled:opacity-50"
                   >
-                    {retrying ? 'Retrying...' : 'Reconnect'}
+                    {retrying ? 'Connecting...' : 'Reconnect'}
                   </button>
                 </div>
               ) : (
-                <span className="text-xs text-slate-400">Verifying Connection...</span>
+                <span className="text-[11px] text-slate-400">Verifying...</span>
               )}
             </div>
 
-            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+            <div className="h-3 w-px bg-slate-200 dark:bg-slate-800" />
 
             <ThemeToggle />
           </div>
         </header>
 
-        {/* Global Offline Banner if in simulated mode */}
-        {backendStatus === 'offline' && (
-          <div className="bg-amber-500/5 dark:bg-amber-500/10 border-b border-amber-500/25 px-8 py-2 text-xs text-amber-600 dark:text-amber-400 flex items-center justify-between">
-            <p>
-              <strong>Running in Simulated Offline Mode.</strong> The backend server is unreachable. Validations and rules are run locally and persisted to browser storage.
-            </p>
-            <button
-              onClick={() => checkBackendHealth(true)}
-              className="underline font-semibold hover:no-underline"
-            >
-              Retry Connection
-            </button>
-          </div>
-        )}
-
         {/* Page contents container */}
-        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 p-5 md:p-6 overflow-y-auto">
           <div className="mx-auto max-w-6xl w-full">
             <Suspense
               fallback={
-                <div className="flex items-center justify-center min-h-[300px]">
+                <div className="flex items-center justify-center min-h-[200px]">
                   <Loader label="Loading workspace" />
                 </div>
               }

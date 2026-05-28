@@ -5,11 +5,12 @@ import { useDataset } from '../context/DatasetContext';
 
 const TASKS_KEY = 'pulseqc:scheduled-tasks';
 const FEED_KEY = 'pulseqc:orchestrator-feed';
+const CONNECTIONS_KEY = 'pulseqc:db-connections';
 
 const defaultTasks = [
   {
     id: 'task-1',
-    name: 'Daily Customer Email Validation',
+    name: 'Daily Customers Email Validation',
     dataset: 'mysql_crm.customers',
     status: 'active',
     frequency: 'daily',
@@ -20,20 +21,20 @@ const defaultTasks = [
     rowsScanned: 15420,
     rowsReturned: 0,
     duration: '0.85s',
-    emailStatus: 'Alerts active (recipient: data-ops@enterprise.com)',
+    emailStatus: 'Notification Sent: Active (recipient: data-ops@enterprise.com)',
     steps: [
-      'Triggered by cron scheduler',
-      'Dequeued from Redis queue: active_jobs',
-      'Established database connection... OK',
-      'Running SQL verification query... OK',
-      'Checking zero violation conditions... OK',
-      'Validation completed: 0 failed rows detected',
-      'Notification dispatch: Not required (0 failures)'
+      'Validation Processing: Triggered by scheduled rule trigger.',
+      'Queue Event: Dequeued from validation job queue.',
+      'Task Step: Established connection with mysql_crm... OK',
+      'Task Step: Running business rule verification query... OK',
+      'Validation Processing: Checking validation conditions... OK',
+      'Validation Processing: Completed (0 returned rows).',
+      'Notification Sent: Bypassed (0 failures).'
     ]
   },
   {
     id: 'task-2',
-    name: 'Weekly Financial Transaction Auditor',
+    name: 'Weekly Financial Transaction Validation',
     dataset: 'pg_production.transactions',
     status: 'active',
     frequency: 'weekly',
@@ -44,20 +45,20 @@ const defaultTasks = [
     rowsScanned: 843210,
     rowsReturned: 42,
     duration: '3.12s',
-    emailStatus: 'Alerts active (recipient: security-auditors@enterprise.com)',
+    emailStatus: 'Notification Sent: Active (recipient: security-auditors@enterprise.com)',
     steps: [
-      'Triggered by cron scheduler',
-      'Dequeued from Redis queue: active_jobs',
-      'Established database connection... OK',
-      'Running SQL verification query... OK',
-      'Checking zero violation conditions... Failed (42 rows returned)',
-      'Validation completed: 42 anomalies detected',
-      'Notification dispatch: Dispatched email alert to security-auditors@enterprise.com'
+      'Validation Processing: Triggered by scheduled rule trigger.',
+      'Queue Event: Dequeued from validation job queue.',
+      'Task Step: Established connection with pg_production... OK',
+      'Task Step: Running business rule verification query... OK',
+      'Validation Processing: Checking validation conditions... Failed (42 returned rows).',
+      'Validation Processing: Completed (42 anomalies caught).',
+      'Notification Sent: Sent report digest to security-auditors@enterprise.com'
     ]
   },
   {
     id: 'task-3',
-    name: 'Bi-Weekly Student Attendance Quality Check',
+    name: 'Bi-Weekly Student Attendance Validation',
     dataset: 'mongo_logs.attendance_records',
     status: 'paused',
     frequency: 'every 2 weeks',
@@ -68,34 +69,36 @@ const defaultTasks = [
     rowsScanned: 4500,
     rowsReturned: 18,
     duration: '0.45s',
-    emailStatus: 'Alerts disabled (paused)',
+    emailStatus: 'Notification Sent: Inactive (paused)',
     steps: [
-      'Scheduler paused by administrator'
+      'Validation Processing: Validation schedule paused by administrator.'
     ]
   }
 ];
 
 const initialTimelineEvents = [
-  { time: new Date(Date.now() - 60000 * 5).toLocaleTimeString(), text: 'Redis job queue connection: ONLINE' },
-  { time: new Date(Date.now() - 60000 * 4).toLocaleTimeString(), text: 'Worker Node #1 registered: ID node-f8a9' },
-  { time: new Date(Date.now() - 60000 * 3).toLocaleTimeString(), text: 'Weekly Financial Transaction Auditor completed: 42 anomalies flagged' },
-  { time: new Date(Date.now() - 60000 * 2).toLocaleTimeString(), text: 'Dispatched alert to security-auditors@enterprise.com' },
-  { time: new Date(Date.now() - 60000 * 1).toLocaleTimeString(), text: 'Scheduler task tick: Checking active intervals' },
+  { time: new Date(Date.now() - 60000 * 5).toLocaleTimeString(), text: 'Queue Event: Job broker connected (ONLINE)' },
+  { time: new Date(Date.now() - 60000 * 4).toLocaleTimeString(), text: 'Worker Processing: Worker Node registered' },
+  { time: new Date(Date.now() - 60000 * 3).toLocaleTimeString(), text: 'Execution Event: Financial Transaction validation completed. 42 violations flagged.' },
+  { time: new Date(Date.now() - 60000 * 2).toLocaleTimeString(), text: 'Notification Sent: Validation digest sent to security-auditors@enterprise.com' },
+  { time: new Date(Date.now() - 60000 * 1).toLocaleTimeString(), text: 'Validation Processing: Chrono-trigger tick checked.' },
 ];
 
 export default function DashboardPage() {
   const { pushToast } = useDataset();
   const [tasks, setTasks] = useState([]);
   const [timeline, setTimeline] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [expandedTaskId, setExpandedTaskId] = useState(null);
+  const [detailTab, setDetailTab] = useState('summary'); // 'summary' | 'sql' | 'logs'
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [editFreqValue, setEditFreqValue] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Load scheduler state
   useEffect(() => {
     const storedTasks = localStorage.getItem(TASKS_KEY);
     const storedTimeline = localStorage.getItem(FEED_KEY);
+    const storedConnections = localStorage.getItem(CONNECTIONS_KEY);
 
     if (storedTasks) {
       setTasks(JSON.parse(storedTasks));
@@ -111,20 +114,30 @@ export default function DashboardPage() {
       localStorage.setItem(FEED_KEY, JSON.stringify(initialTimelineEvents));
     }
 
+    if (storedConnections) {
+      setConnections(JSON.parse(storedConnections));
+    } else {
+      setConnections([
+        { name: 'pg_production', type: 'postgresql', status: 'connected', isActive: true },
+        { name: 'mysql_crm', type: 'mysql', status: 'connected', isActive: false },
+        { name: 'mongo_logs', type: 'mongodb', status: 'connected', isActive: false },
+      ]);
+    }
+
     setLoading(false);
   }, []);
 
-  // Periodic simulated timeline updates (Real-time orchestration logs)
+  // Simulating active validation operation logs
   useEffect(() => {
     if (loading) return;
 
     const phrases = [
-      'Cron tick: Active database tables verified.',
-      'Worker node heartbeats verified: HEALTHY.',
-      'Redis queue active_jobs length: 0 pending.',
-      'Database connection verified for pg_production: OK.',
-      'Logs rotated for scheduler daemon.',
-      'Simulated cron run completed in 0.25s.',
+      'Validation Processing: Scheduler cron validation checks completed.',
+      'Worker Processing: Active container nodes validated (HEALTHY).',
+      'Queue Event: Redis scheduler queue size: 0 pending.',
+      'Task Step: Established handshake with pg_production database: OK.',
+      'Background Task: Dispatched execution telemetry digest logs.',
+      'Execution Event: Rules compilation completed successfully in 0.12s.',
     ];
 
     const interval = setInterval(() => {
@@ -133,11 +146,11 @@ export default function DashboardPage() {
         text: phrases[Math.floor(Math.random() * phrases.length)],
       };
       setTimeline((prev) => {
-        const next = [newEvent, ...prev.slice(0, 19)];
+        const next = [newEvent, ...prev.slice(0, 14)];
         localStorage.setItem(FEED_KEY, JSON.stringify(next));
         return next;
       });
-    }, 15000);
+    }, 12000);
 
     return () => clearInterval(interval);
   }, [loading]);
@@ -147,7 +160,8 @@ export default function DashboardPage() {
     localStorage.setItem(TASKS_KEY, JSON.stringify(updatedTasks));
   };
 
-  const handleToggleStatus = (id) => {
+  const handleToggleStatus = (id, e) => {
+    e.stopPropagation();
     const updated = tasks.map((task) => {
       if (task.id === id) {
         const nextStatus = task.status === 'active' ? 'paused' : 'active';
@@ -155,7 +169,13 @@ export default function DashboardPage() {
           ...task,
           status: nextStatus,
           nextRun: nextStatus === 'active' ? new Date(Date.now() + 3600000 * 12).toISOString() : null,
-          emailStatus: nextStatus === 'active' ? 'Alerts active' : 'Alerts disabled (paused)'
+          emailStatus: nextStatus === 'active' ? 'Notification Sent: Active' : 'Notification Sent: Inactive (paused)',
+          steps: nextStatus === 'active'
+            ? [
+                'Validation Processing: Validation trigger activated by user.',
+                'Queue Event: Cron schedule enqueued into active_jobs.'
+              ]
+            : ['Validation Processing: Schedule paused by administrator.']
         };
       }
       return task;
@@ -163,56 +183,60 @@ export default function DashboardPage() {
     saveTasks(updated);
     pushToast({
       tone: 'success',
-      title: 'Schedule Status Updated',
-      message: 'The validation schedule status has been updated successfully.'
+      title: 'Validation Schedule Updated',
+      message: 'The validation workflow trigger state has been updated.'
     });
   };
 
-  const handleRerunTask = (id) => {
+  const handleRerunTask = (id, e) => {
+    e.stopPropagation();
     const updated = tasks.map((task) => {
       if (task.id === id) {
         return {
           ...task,
           lastRun: new Date().toISOString(),
           rowsScanned: task.rowsScanned + Math.floor(Math.random() * 50),
-          rowsReturned: Math.floor(Math.random() * 5) === 0 ? Math.floor(Math.random() * 10) : 0,
+          rowsReturned: Math.floor(Math.random() * 5) === 0 ? Math.floor(Math.random() * 6) : 0,
         };
       }
       return task;
     });
     saveTasks(updated);
 
-    // Add entry to feed
     const targetTask = tasks.find(t => t.id === id);
     const logEvent = {
       time: new Date().toLocaleTimeString(),
-      text: `Ad-hoc execution triggered for "${targetTask.name}"... Completed (0.42s).`
+      text: `Execution Event: Ad-hoc validation check triggered for "${targetTask.name}" completed.`
     };
     setTimeline(prev => [logEvent, ...prev]);
 
     pushToast({
       tone: 'success',
-      title: 'Validation Executed',
-      message: `The ad-hoc validation task run finished.`
+      title: 'Validation Run Executed',
+      message: `The ad-hoc validation check was executed successfully.`
     });
   };
 
-  const handleDeleteTask = (id) => {
+  const handleDeleteTask = (id, e) => {
+    e.stopPropagation();
     const updated = tasks.filter((t) => t.id !== id);
     saveTasks(updated);
+    if (expandedTaskId === id) setExpandedTaskId(null);
     pushToast({
       tone: 'success',
-      title: 'Scheduled Task Deleted',
-      message: 'The selected scheduled validation task was removed.'
+      title: 'Validation Schedule Removed',
+      message: 'The selected scheduled validation rule has been deleted.'
     });
   };
 
-  const handleStartEdit = (task) => {
+  const handleStartEdit = (task, e) => {
+    e.stopPropagation();
     setEditingTaskId(task.id);
     setEditFreqValue(task.frequency);
   };
 
-  const handleSaveEdit = (id) => {
+  const handleSaveEdit = (id, e) => {
+    e.stopPropagation();
     const updated = tasks.map((task) => {
       if (task.id === id) {
         return { ...task, frequency: editFreqValue };
@@ -223,8 +247,8 @@ export default function DashboardPage() {
     setEditingTaskId(null);
     pushToast({
       tone: 'success',
-      title: 'Schedule Updated',
-      message: `Task schedule interval was changed to: ${editFreqValue}`
+      title: 'Validation Schedule Changed',
+      message: `Validation frequency updated to: ${editFreqValue}`
     });
   };
 
@@ -236,273 +260,274 @@ export default function DashboardPage() {
     }).format(new Date(value));
   };
 
-  const activeSchedules = useMemo(() => tasks.filter(t => t.status === 'active').length, [tasks]);
+  // Connected database summaries with active schedule statistics
+  const dbSummaries = useMemo(() => {
+    return connections.map((conn) => {
+      const activeCount = tasks.filter((t) => t.dataset.startsWith(conn.name) && t.status === 'active').length;
+      return { ...conn, activeCount };
+    });
+  }, [connections, tasks]);
 
   return (
-    <div className="space-y-8 animate-slide-up">
-      {/* Header section */}
-      <div>
-        <p className="section-kicker">Orchestration & Schedules</p>
-        <h2 className="text-3xl font-semibold text-slate-900 dark:text-white mt-1">Scheduled Validations</h2>
-        <p className="text-sm text-slate-500 mt-2">
-          Monitor recurring validations, active task frequencies, row results, and live pipeline activities.
-        </p>
+    <div className="space-y-6 animate-slide-up">
+      {/* Title */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="section-kicker">Platform Console</p>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">Live Validation Dashboard</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Observe running validation tasks, connection contexts, and schedule operations.
+          </p>
+        </div>
       </div>
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader label="Loading scheduled workflows..." />
+          <Loader label="Loading operational feed..." />
         </div>
       ) : (
-        <>
-          {/* Scheduler Metrics Dashboard summary */}
-          {tasks.length > 0 && (
-            <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4">
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Active schedules</span>
-                <p className="text-2xl font-bold mt-1 text-slate-900 dark:text-white">{activeSchedules} / {tasks.length}</p>
+        <div className="grid gap-6 lg:grid-cols-4">
+          
+          {/* Main task list (Widescreen 3-columns) */}
+          <div className="lg:col-span-3 space-y-4">
+            
+            {/* Active scheduled validations section */}
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-850 pb-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Scheduled Validation Tasks</h3>
+                <span className="text-xs text-slate-400 font-semibold">{tasks.length} rules active</span>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4">
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Anomalies caught</span>
-                <p className="text-2xl font-bold mt-1 text-slate-900 dark:text-white">
-                  {tasks.reduce((acc, t) => acc + t.rowsReturned, 0)}
-                </p>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4">
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Total Scanned rows</span>
-                <p className="text-2xl font-bold mt-1 text-slate-900 dark:text-white">
-                  {new Intl.NumberFormat('en-US', { notation: 'compact' }).format(tasks.reduce((acc, t) => acc + t.rowsScanned, 0))}
-                </p>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4">
-                <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Redis queue status</span>
-                <p className="text-2xl font-bold mt-1 text-emerald-500">Idle</p>
-              </div>
-            </div>
-          )}
 
-          {/* Active Tasks Feed */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Validation Scheduler Feed</h3>
-              <span className="text-xs text-slate-400">{tasks.length} validation tasks registered</span>
-            </div>
+              {tasks.length === 0 ? (
+                <div className="empty-state py-8">
+                  <p className="text-slate-900 dark:text-white font-medium">Currently no scheduled validations running</p>
+                  <p className="text-slate-500 text-xs mt-1">
+                    Describe a business rule in the Rule Workspace and define a schedule trigger to begin.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-850">
+                  {tasks.map((task) => {
+                    const isExpanded = expandedTaskId === task.id;
+                    const isEditing = editingTaskId === task.id;
 
-            {tasks.length === 0 ? (
-              <div className="empty-state">
-                <svg className="mx-auto h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-slate-900 dark:text-white font-medium mt-3">No active scheduled validations</p>
-                <p className="text-slate-500 text-xs mt-1 max-w-sm mx-auto">
-                  Describe a business query in the Rule Workspace and define a schedule (e.g. "every day") to populate this dashboard.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {tasks.map((task) => {
-                  const isExpanded = expandedTaskId === task.id;
-                  const isEditing = editingTaskId === task.id;
-
-                  return (
-                    <div
-                      key={task.id}
-                      className="border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/30 overflow-hidden transition-all duration-200"
-                    >
-                      {/* Main Collapsible Item row */}
-                      <div
-                        onClick={() => !isEditing && setExpandedTaskId(isExpanded ? null : task.id)}
-                        className={`flex flex-col md:flex-row md:items-center justify-between p-4 cursor-pointer gap-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${
-                          isExpanded ? 'border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40' : ''
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3">
-                            <span
-                              className={`h-2.5 w-2.5 rounded-full ${
-                                task.status === 'active'
-                                  ? 'bg-emerald-500 animate-pulse'
-                                  : 'bg-slate-400'
-                              }`}
-                            />
-                            <h4 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{task.name}</h4>
-                            <span className="text-slate-200 dark:text-slate-800 hidden md:block">|</span>
-                            <span className="text-xs text-slate-500 truncate hidden md:block">{task.dataset}</span>
+                    return (
+                      <div key={task.id} className="py-3.5 first:pt-0 last:pb-0 space-y-3.5">
+                        
+                        {/* Summary inline row */}
+                        <div
+                          onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+                          className="flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2.5 w-2.5 rounded-full ${task.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                              <h4 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{task.name}</h4>
+                            </div>
+                            <p className="text-xs text-slate-500 italic mt-1.5 truncate">
+                              "{task.originalPrompt}"
+                            </p>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-slate-400">
+                              <span>
+                                <strong className="text-slate-400 dark:text-slate-600">Database:</strong> {task.dataset}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                <strong className="text-slate-400 dark:text-slate-600">Frequency:</strong> {task.frequency}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                <strong className="text-slate-400 dark:text-slate-600">Rows Scanned:</strong> {task.rowsScanned.toLocaleString()}
+                              </span>
+                              <span>•</span>
+                              <span className={task.rowsReturned > 0 ? 'text-rose-500 font-semibold' : ''}>
+                                <strong className="text-slate-400 dark:text-slate-600">Violations:</strong> {task.rowsReturned}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-slate-500">
-                            <span className="flex items-center gap-1">
-                              <span className="font-semibold text-slate-400 dark:text-slate-600">Interval:</span>
-                              {task.frequency}
-                            </span>
-                            <span>•</span>
-                            <span>
-                              <span className="font-semibold text-slate-400 dark:text-slate-600">Scanned:</span> {task.rowsScanned.toLocaleString()}
-                            </span>
-                            <span>•</span>
-                            <span className={task.rowsReturned > 0 ? 'text-rose-500 font-semibold' : ''}>
-                              <span className="font-semibold text-slate-400 dark:text-slate-600">Failures:</span> {task.rowsReturned}
-                            </span>
+
+                          <div className="flex items-center justify-between md:justify-end gap-5 text-xs" onClick={(e) => e.stopPropagation()}>
+                            <div className="text-right hidden sm:block">
+                              <span className="text-[10px] text-slate-400 uppercase tracking-wide block">Next execution</span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300 mt-0.5 block">
+                                {task.status === 'active' ? formatDateTime(task.nextRun) : 'Paused'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => handleRerunTask(task.id, e)}
+                                className="rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-1 font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+                              >
+                                Run
+                              </button>
+                              <button
+                                onClick={(e) => handleToggleStatus(task.id, e)}
+                                className={`rounded px-2.5 py-1 font-semibold transition-colors ${
+                                  task.status === 'active'
+                                    ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500'
+                                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500'
+                                }`}
+                              >
+                                {task.status === 'active' ? 'Pause' : 'Resume'}
+                              </button>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-4 text-xs">
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-400 block uppercase font-medium">Last Run</span>
-                            <span className="text-slate-600 dark:text-slate-300 font-medium mt-0.5 block">{formatDateTime(task.lastRun)}</span>
-                          </div>
-                          <div className="text-right min-w-[100px]">
-                            <span className="text-[10px] text-slate-400 block uppercase font-medium">Next Run</span>
-                            <span className="text-slate-600 dark:text-slate-300 font-medium mt-0.5 block">
-                              {task.status === 'active' ? formatDateTime(task.nextRun) : 'Paused'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 max-md:mt-2" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => handleRerunTask(task.id)}
-                              className="rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-1 font-semibold text-slate-700 dark:text-slate-300 transition-colors"
-                              title="Rerun validation check immediately"
-                            >
-                              Run
-                            </button>
-                            <button
-                              onClick={() => handleToggleStatus(task.id)}
-                              className={`rounded px-2 py-1 font-semibold transition-colors ${
-                                task.status === 'active'
-                                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500'
-                                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500'
-                              }`}
-                            >
-                              {task.status === 'active' ? 'Pause' : 'Resume'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                        {/* Collapsible drawer with Progressive Tabs disclosure */}
+                        {isExpanded && (
+                          <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 p-4 space-y-4">
+                            
+                            {/* Drawer Tabs */}
+                            <div className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-2">
+                              {[
+                                ['summary', 'Execution Details'],
+                                ['sql', 'SQL Preview'],
+                                ['logs', 'Validation Operations Logs']
+                              ].map(([tabId, label]) => (
+                                <button
+                                  key={tabId}
+                                  onClick={() => setDetailTab(tabId)}
+                                  className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
+                                    detailTab === tabId
+                                      ? 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white'
+                                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
 
-                      {/* Dropdown details content */}
-                      {isExpanded && (
-                        <div className="p-5 bg-white dark:bg-slate-900/10 space-y-5 text-sm">
-                          <div className="grid gap-6 md:grid-cols-2">
-                            {/* Query details */}
-                            <div className="space-y-3">
-                              <div>
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Original User Request</span>
-                                <p className="text-slate-700 dark:text-slate-300 mt-1 italic">"{task.originalPrompt}"</p>
+                            {/* Tab 1: Summary */}
+                            {detailTab === 'summary' && (
+                              <div className="grid gap-4 md:grid-cols-2 text-xs">
+                                <div className="space-y-2">
+                                  <div>
+                                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Active Database Connector</span>
+                                    <span className="text-slate-700 dark:text-slate-200 block mt-0.5">{task.dataset}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Natural Language Prompt</span>
+                                    <p className="text-slate-700 dark:text-slate-300 block mt-0.5 italic">"{task.originalPrompt}"</p>
+                                  </div>
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[10px] uppercase font-semibold text-slate-400 block">Execution duration</span>
+                                      <span className="text-slate-700 dark:text-slate-200 block font-mono mt-0.5">{task.duration}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] uppercase font-semibold text-slate-400 block">System Alerts Status</span>
+                                      <span className="text-slate-700 dark:text-slate-200 block mt-0.5">{task.emailStatus}</span>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] uppercase font-semibold text-slate-400 block">Last Run Triggered</span>
+                                    <span className="text-slate-700 dark:text-slate-200 block mt-0.5">{formatDateTime(task.lastRun)}</span>
+                                  </div>
+                                </div>
                               </div>
+                            )}
+
+                            {/* Tab 2: SQL Code block preview */}
+                            {detailTab === 'sql' && (
                               <div>
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Generated SQL Query</span>
-                                <pre className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-600 dark:text-slate-400 overflow-x-auto mt-1 leading-relaxed">
+                                <span className="text-[10px] uppercase font-semibold text-slate-400 block">Validation SQL</span>
+                                <pre className="mt-1 bg-slate-950 p-3 rounded border border-slate-800 font-mono text-xs text-slate-300 overflow-x-auto leading-relaxed">
                                   {task.sql}
                                 </pre>
                               </div>
-                            </div>
+                            )}
 
-                            {/* Status Logs and info */}
-                            <div className="space-y-4">
-                              <div className="flex justify-between items-center">
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Execution Steps Log</span>
-                                <StatusBadge tone={task.status === 'active' ? 'success' : 'pending'}>
-                                  {task.status}
-                                </StatusBadge>
+                            {/* Tab 3: Detailed execution timeline logs */}
+                            {detailTab === 'logs' && (
+                              <div className="space-y-3">
+                                <span className="text-[10px] uppercase font-semibold text-slate-400 block">Step-by-step Operational logs</span>
+                                <div className="rounded border border-slate-200 dark:border-slate-800 bg-slate-950 p-3.5 space-y-1.5 font-mono text-xs text-slate-300">
+                                  {task.steps.map((step, idx) => (
+                                    <div key={idx} className="flex gap-2">
+                                      <span className="text-slate-500 select-none">[{idx + 1}]</span>
+                                      <span>{step}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-3.5 space-y-2">
-                                {task.steps.map((step, i) => (
-                                  <div key={i} className="flex gap-2.5 text-xs text-slate-600 dark:text-slate-400">
-                                    <span className="text-slate-300 dark:text-slate-700 select-none">{i + 1}.</span>
-                                    <span>{step}</span>
+                            )}
+
+                            {/* Action block bar inside progressive panel */}
+                            <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-800/80 pt-3.5 mt-2">
+                              <div className="flex items-center gap-3">
+                                {isEditing ? (
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={editFreqValue}
+                                      onChange={(e) => setEditFreqValue(e.target.value)}
+                                      placeholder="Frequency interval"
+                                      className="input-shell py-0.5 px-2 text-xs w-40"
+                                      title="Interval input"
+                                    />
+                                    <button
+                                      onClick={(e) => handleSaveEdit(task.id, e)}
+                                      className="primary-button text-xs py-1 px-3"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={() => setEditingTaskId(null)}
+                                      className="secondary-button text-xs py-1 px-3"
+                                    >
+                                      Cancel
+                                    </button>
                                   </div>
-                                ))}
+                                ) : (
+                                  <button
+                                    onClick={(e) => handleStartEdit(task, e)}
+                                    className="text-xs font-semibold text-sky-500 hover:text-sky-400 flex items-center gap-1"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                                    </svg>
+                                    Edit Schedule
+                                  </button>
+                                )}
                               </div>
 
-                              <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500">
-                                <div>
-                                  <span className="font-semibold text-slate-400 block">Execution duration</span>
-                                  <span className="mt-0.5 block font-mono text-slate-700 dark:text-slate-300">{task.duration}</span>
-                                </div>
-                                <div>
-                                  <span className="font-semibold text-slate-400 block">Email integration</span>
-                                  <span className="mt-0.5 block text-slate-700 dark:text-slate-300">{task.emailStatus}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Detail Actions block */}
-                          <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80 pt-4 mt-2">
-                            <div className="flex items-center gap-3">
-                              {isEditing ? (
-                                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="text"
-                                    value={editFreqValue}
-                                    onChange={(e) => setEditFreqValue(e.target.value)}
-                                    placeholder="e.g. daily, weekly, every 3 weeks"
-                                    className="input-shell py-1 px-3 text-xs w-48"
-                                    title="Interval format"
-                                  />
-                                  <button
-                                    onClick={() => handleSaveEdit(task.id)}
-                                    className="primary-button text-xs py-1 px-3"
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    onClick={() => setEditingTaskId(null)}
-                                    className="secondary-button text-xs py-1 px-3"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStartEdit(task);
-                                  }}
-                                  className="text-xs font-semibold text-sky-500 hover:text-sky-400 flex items-center gap-1"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                                  </svg>
-                                  Edit Schedule Frequency
-                                </button>
-                              )}
+                              <button
+                                onClick={(e) => handleDeleteTask(task.id, e)}
+                                className="text-xs font-semibold text-rose-500 hover:text-rose-450 flex items-center gap-1"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Delete Task
+                              </button>
                             </div>
 
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteTask(task.id);
-                              }}
-                              className="text-xs font-semibold text-rose-500 hover:text-rose-400 flex items-center gap-1"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                              Delete Task
-                            </button>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
-          {/* Orchestrator live timeline activities */}
-          <div className="grid gap-6 md:grid-cols-3">
-            <div className="md:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
+            {/* Live operational log feeds timeline */}
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Live Orchestration Timeline</h3>
-                <p className="text-xs text-slate-400 mt-1">Real-time daemon verification feeds and Redis queue actions.</p>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Live Orchestration Timeline</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Real-time validation operations and active log traces.</p>
               </div>
 
-              <div className="rounded-lg bg-slate-950 text-slate-300 dark:text-slate-400 p-4 font-mono text-xs h-[180px] overflow-y-auto space-y-2 leading-relaxed">
+              <div className="rounded border border-slate-200 dark:border-slate-800 bg-slate-950 p-4 font-mono text-xs h-[160px] overflow-y-auto space-y-2 leading-relaxed">
                 {timeline.map((event, idx) => (
                   <div key={idx} className="flex gap-3">
                     <span className="text-slate-500 select-none">[{event.time}]</span>
-                    <span className={event.text.includes('flagged') || event.text.includes('Failed') ? 'text-rose-400 font-medium' : event.text.includes('completed') ? 'text-emerald-400' : 'text-slate-300'}>
+                    <span className={event.text.includes('Failed') || event.text.includes('violations') ? 'text-rose-400 font-medium' : event.text.includes('completed') ? 'text-emerald-400' : 'text-slate-300'}>
                       {event.text}
                     </span>
                   </div>
@@ -510,34 +535,58 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 flex flex-col justify-between">
+          </div>
+
+          {/* Connected databases status widget on the right (1-column) */}
+          <div className="space-y-4 text-xs">
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-200">Worker Status Panel</h3>
-                <p className="text-xs text-slate-400 mt-1">Status of computational worker nodes and job queue.</p>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Active Databases</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Connections status and active schedules count.</p>
               </div>
 
-              <div className="mt-4 space-y-3 flex-1 justify-center flex flex-col">
-                <div className="flex items-center justify-between text-xs border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <span className="text-slate-400">Queue Daemon (Celery/Redis)</span>
-                  <span className="font-semibold text-emerald-500">Connected</span>
-                </div>
-                <div className="flex items-center justify-between text-xs border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <span className="text-slate-400">Active Worker Nodes</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">2 Online</span>
-                </div>
-                <div className="flex items-center justify-between text-xs pb-1">
-                  <span className="text-slate-400">SMTP Server (Notification)</span>
-                  <span className="font-semibold text-emerald-500">Online</span>
-                </div>
+              <div className="space-y-3">
+                {dbSummaries.map((db) => (
+                  <div key={db.name} className="flex items-center justify-between border-b border-slate-100 dark:border-slate-850 pb-2.5 last:border-0 last:pb-0">
+                    <div>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200 block truncate max-w-[120px]">{db.name}</span>
+                      <span className="text-[10px] text-slate-400 block uppercase font-medium mt-0.5">{db.type}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-semibold text-slate-700 dark:text-slate-200 block">{db.activeCount} rules</span>
+                      <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold ${db.status === 'connected' ? 'text-emerald-500' : 'text-slate-400'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${db.status === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                        {db.status === 'connected' ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
+            </div>
 
-              <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex items-center justify-between text-xs text-slate-400">
-                <span>CPU Load: 0.12%</span>
-                <span>RAM Load: 4.8%</span>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/30 p-5 space-y-3">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Computational Nodes</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Queue processor clusters health status.</p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-850 pb-1.5">
+                  <span className="text-slate-400">Worker Status</span>
+                  <span className="font-semibold text-emerald-500">2 Active Nodes</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-850 pb-1.5">
+                  <span className="text-slate-400">Redis Broker</span>
+                  <span className="font-semibold text-emerald-500 font-mono">OK</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Queue Loads</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Idle (0 jobs)</span>
+                </div>
               </div>
             </div>
           </div>
-        </>
+
+        </div>
       )}
     </div>
   );
