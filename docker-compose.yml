@@ -8,6 +8,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
       STATEMENT_TIMEOUT_MS: 15000
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
@@ -40,6 +46,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
       STATEMENT_TIMEOUT_MS: 15000
       RULE_EXECUTION_JITTER_SECONDS: ${RULE_EXECUTION_JITTER_SECONDS:-120}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
@@ -65,6 +77,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL: ${SLACK_CHANNEL:-}
@@ -121,6 +139,11 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
       CELERY_BROKER_URL: redis://redis:6379/0
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-llama3-8b-8192}

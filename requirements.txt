@@ -19,6 +19,7 @@ loguru>=0.7,<1.0
 
 # --- LLM Integration ---
 groq>=0.9.0
+google-genai>=1.0.0
 celery>=5.4.0
 redis>=5.0.0
 tenacity>=8.0.0

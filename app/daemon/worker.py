@@ -107,6 +107,7 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
     expected = rule_dict.get("expected_result", {})
     pseudo_rule = RuleExecutionRequest(
         rule_id=rule_dict["rule_id"],
+        database_connection_id=rule_dict.get("database_connection_id"),
         rule_name=rule_dict["rule_name"],
         sql=rule_dict.get("sql", ""),
         expected_result=ExpectedResult(
@@ -143,6 +144,7 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
 
     pseudo_result = RuleExecutionResult(
         rule_id=rule_dict["rule_id"],
+        database_connection_id=rule_dict.get("database_connection_id"),
         rule_name=rule_dict["rule_name"],
         status="FAIL",
         result={"violation_count": violation_count} if violation_count is not None else None,

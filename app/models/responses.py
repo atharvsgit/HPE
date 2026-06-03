@@ -26,6 +26,7 @@ class AIEnrichment(BaseModel):
 
 class RuleExecutionResult(BaseModel):
     rule_id: int | None = None
+    database_connection_id: int | None = None
     rule_name: str
     status: Literal["PASS", "FAIL", "ERROR"]
     result: dict[str, int | float] | None
@@ -39,10 +40,15 @@ class RuleExecutionResult(BaseModel):
 
 class SavedRuleResponse(BaseModel):
     rule_id: int
+    database_connection_id: int | None = None
+    database_name: str | None = None
+    table_name: str | None = None
     rule_name: str
     sql: str
     expected_result: ExpectedResult
+    schedule_text: str | None = None
     schedule_cron: str | None
+    notification_channels: list[str] = Field(default_factory=lambda: ["slack"])
     is_enabled: bool
     severity: Literal["critical", "high", "medium", "low"]
     created_at: datetime

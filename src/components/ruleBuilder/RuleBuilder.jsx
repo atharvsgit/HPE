@@ -232,6 +232,12 @@ const scheduleOptions = [
     description: 'Save this rule for manual execution only.',
   },
   {
+    id: 'every_1_minute',
+    label: 'Every 1 minute',
+    cron: '* * * * *',
+    description: 'Demo mode: the scheduler runs this saved rule once per minute.',
+  },
+  {
     id: 'every_5_minutes',
     label: 'Every 5 minutes',
     cron: '*/5 * * * *',
@@ -278,6 +284,29 @@ const scheduleOptions = [
     label: 'Every year',
     cron: '0 9 1 1 *',
     description: 'Runs every January 1 at 09:00 UTC.',
+  },
+];
+
+const severityOptions = [
+  {
+    id: 'critical',
+    label: 'Critical',
+    description: 'Dispatch immediately and send Slack/email alerts on failure.',
+  },
+  {
+    id: 'high',
+    label: 'High',
+    description: 'Batch for the high-priority alert window before dispatch.',
+  },
+  {
+    id: 'medium',
+    label: 'Medium',
+    description: 'Default alert priority for normal scheduled checks.',
+  },
+  {
+    id: 'low',
+    label: 'Low',
+    description: 'Lowest alert priority for informational checks.',
   },
 ];
 
@@ -342,6 +371,7 @@ export default function RuleBuilder() {
   const [loading, setLoading] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
   const [schedulePreset, setSchedulePreset] = useState('manual');
+  const [alertSeverity, setAlertSeverity] = useState('critical');
   const [queryMinThreshold, setQueryMinThreshold] = useState('1');
   const [customExpectationEnabled, setCustomExpectationEnabled] = useState(false);
   const [expectationType, setExpectationType] = useState('min_threshold');
@@ -380,6 +410,9 @@ export default function RuleBuilder() {
   const selectedScheduleOption =
     scheduleOptions.find((option) => option.id === schedulePreset) ||
     scheduleOptions[0];
+  const selectedSeverityOption =
+    severityOptions.find((option) => option.id === alertSeverity) ||
+    severityOptions[0];
   const generatedSqlPreview = useMemo(
     () =>
       buildSqlFromRule({
@@ -826,13 +859,14 @@ export default function RuleBuilder() {
         expected_result: expectedResult,
         schedule_cron: selectedScheduleOption.cron,
         is_enabled: true,
+        severity: alertSeverity,
       });
 
       pushToast({
         tone: 'success',
         title: 'Rule saved',
         message: selectedScheduleOption.cron
-          ? `${savedRule.ruleName} was saved to run ${selectedScheduleOption.label.toLowerCase()}. Restart the scheduler container if it was already running.`
+          ? `${savedRule.ruleName} was saved to run ${selectedScheduleOption.label.toLowerCase()} with ${selectedSeverityOption.label.toLowerCase()} alerts. The scheduler refreshes within one minute.`
           : `${savedRule.ruleName} is available in saved validation history.`,
       });
     } catch (error) {
@@ -1394,7 +1428,7 @@ export default function RuleBuilder() {
               </span>
             </div>
 
-            <div className="mt-4 max-w-xl">
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <label className="field-label" htmlFor="rule-schedule-preset">
                   Schedule
@@ -1412,9 +1446,27 @@ export default function RuleBuilder() {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="field-label" htmlFor="rule-alert-severity">
+                  Alert Severity
+                </label>
+                <select
+                  id="rule-alert-severity"
+                  value={alertSeverity}
+                  onChange={(event) => setAlertSeverity(event.target.value)}
+                  className="input-shell"
+                >
+                  {severityOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <p className="field-hint">
-              {selectedScheduleOption.description} If the scheduler is already running, restart it after saving a new scheduled rule.
+              {selectedScheduleOption.description} {selectedSeverityOption.description} Saved scheduler changes are picked up by the backend within one minute.
             </p>
           </div>
 

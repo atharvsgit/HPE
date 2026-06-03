@@ -64,7 +64,7 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
             
         # 2. Fetch rule details to construct a pseudo-request/result for the notifier
         rule_row = (await conn.execute(
-            text("SELECT rule_name, sql_text, expected_result_type, expected_result_value FROM dq_config.dq_rules WHERE rule_id = :rule_id"),
+            text("SELECT database_connection_id, rule_name, sql_text, expected_result_type, expected_result_value FROM dq_config.dq_rules WHERE rule_id = :rule_id"),
             {"rule_id": rule_id}
         )).mappings().first()
         
@@ -79,6 +79,7 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
     # Future: LLM summary injection point here.
     pseudo_rule = RuleExecutionRequest(
         rule_id=rule_id,
+        database_connection_id=rule_row["database_connection_id"],
         rule_name=rule_row["rule_name"],
         sql=rule_row["sql_text"],
         expected_result=ExpectedResult(
@@ -91,6 +92,7 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
     from app.models.responses import RuleExecutionResult
     pseudo_result = RuleExecutionResult(
         rule_id=rule_id,
+        database_connection_id=rule_row["database_connection_id"],
         rule_name=rule_row["rule_name"],
         status="FAIL",
         result=None,

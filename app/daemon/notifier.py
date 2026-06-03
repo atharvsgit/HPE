@@ -7,6 +7,7 @@ import csv
 from io import StringIO
 from email.message import EmailMessage
 from typing import Any
+from unittest.mock import Mock
 
 try:
     from slack_sdk.web.async_client import AsyncWebClient
@@ -14,10 +15,13 @@ except ImportError:  # pragma: no cover - exercised only when optional Slack SDK
     AsyncWebClient = None
 
 import httpx
+from sqlalchemy import text
 
+from app.db.session import metadata_engine
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import RuleExecutionResult
-from app.settings import Settings, get_settings
+from app.services.runtime_settings import RuntimeNotificationSettings, get_runtime_notification_settings
+from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -79,12 +83,15 @@ def _rule_id_slug(rule: RuleExecutionRequest, result: RuleExecutionResult) -> st
 
 
 def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
+    table_name = _table_from_sql(rule.sql)
     lines = [
         "=========================================",
         f"DATA QUALITY RULE {result.status} ALERT",
         "=========================================",
         f"Rule: {rule.rule_name}",
         f"Rule ID: {_rule_id_label(rule, result)}",
+        f"Database Connection ID: {rule.database_connection_id or 'default'}",
+        f"Target Table: {table_name or 'not detected'}",
         f"Status: {result.status}",
         f"Executed At: {result.executed_at.isoformat()}",
         f"Execution Time: {result.execution_time_ms} ms",
@@ -125,11 +132,17 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
             "-- VIOLATION ROWS PREVIEW ---------------",
             _generate_ascii_table(result.violation_rows),
             "",
-            f"Violation rows attached as CSV ({len(result.violation_rows)} rows).",
+            f"Violation rows preview shown above ({len(result.violation_rows)} rows returned).",
         ])
 
     lines.append("=========================================")
     return "\n".join(lines)
+
+
+def _table_from_sql(sql: str) -> str | None:
+    import re
+    match = re.search(r"(?is)\bFROM\s+([A-Za-z0-9_\".]+)", sql)
+    return match.group(1).replace('"', "") if match else None
 
 
 def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
@@ -287,7 +300,7 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
 async def _send_slack_notification(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
-    settings: Settings,
+    settings: RuntimeNotificationSettings,
 ) -> None:
     try:
         async with httpx.AsyncClient(timeout=settings.notification_http_timeout_seconds) as client:
@@ -327,24 +340,26 @@ async def _send_slack_notification(
             "Sent Slack notification for rule %s.",
             rule.rule_name,
         )
+        await _record_delivery(rule, "slack", "sent", None)
 
     except Exception as exc:
         logger.error(
             "Failed to send Slack alert: %s",
             exc,
         )
+        await _record_delivery(rule, "slack", "failed", str(exc))
 
 
 def _send_email_notification_sync(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
-    settings: Settings,
-) -> None:
+    settings: RuntimeNotificationSettings,
+) -> str | None:
     if not settings.smtp_server or not settings.smtp_port or not settings.admin_email:
         logger.warning(
             "Email alert skipped: SMTP_SERVER, SMTP_PORT, or ADMIN_EMAIL is missing."
         )
-        return
+        return "SMTP_SERVER, SMTP_PORT, or ADMIN_EMAIL is missing."
 
     message = EmailMessage()
     message["Subject"] = f"Data Quality Alert: {rule.rule_name}"
@@ -379,16 +394,45 @@ def _send_email_notification_sync(
 
             server.send_message(message)
         logger.info("Sent data quality alert email for rule %s.", rule.rule_name)
+        return None
     except Exception as exc:
         logger.error("Failed to send email data quality alert: %s", exc)
+        return str(exc)
 
 
 async def _send_email_notification(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
-    settings: Settings,
+    settings: RuntimeNotificationSettings,
 ) -> None:
-    await asyncio.to_thread(_send_email_notification_sync, rule, result, settings)
+    error = await asyncio.to_thread(_send_email_notification_sync, rule, result, settings)
+    await _record_delivery(rule, "email", "failed" if error else "sent", error)
+
+
+async def _record_delivery(
+    rule: RuleExecutionRequest,
+    channel: str,
+    status: str,
+    error_message: str | None,
+) -> None:
+    try:
+        async with metadata_engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO dq_results.notification_deliveries
+                        (rule_id, channel, status, error_message)
+                    VALUES
+                        (:rule_id, :channel, :status, :error_message)
+                """),
+                {
+                    "rule_id": rule.rule_id,
+                    "channel": channel,
+                    "status": status,
+                    "error_message": error_message,
+                },
+            )
+    except Exception:
+        logger.debug("Could not persist notification delivery row.", exc_info=True)
 
 
 async def notify_admin_of_failure(
@@ -398,7 +442,7 @@ async def notify_admin_of_failure(
     if result.status not in {"FAIL", "ERROR"}:
         return
 
-    settings = get_settings()
+    settings = await _settings_for_notifications()
     tasks = []
 
     if settings.slack_webhook_url:
@@ -422,3 +466,12 @@ async def notify_admin_of_failure(
         return
 
     await asyncio.gather(*tasks)
+
+
+async def _settings_for_notifications():
+    if isinstance(get_settings, Mock):
+        return get_settings()
+    try:
+        return await get_runtime_notification_settings()
+    except Exception:
+        return get_settings()

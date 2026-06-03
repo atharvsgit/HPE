@@ -38,6 +38,7 @@ def enqueue_batch_dispatch(batch_id: int, rule: RuleExecutionRequest) -> bool:
 
         rule_dict = {
             "rule_id": rule.rule_id,
+            "database_connection_id": rule.database_connection_id,
             "rule_name": rule.rule_name,
             "sql": rule.sql,
             "expected_result": {
