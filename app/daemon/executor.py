@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import re
 import logging
+from contextlib import asynccontextmanager
 from collections.abc import Mapping
 from datetime import date
 from datetime import UTC, datetime
@@ -13,11 +14,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.daemon.evaluator import evaluate_observed_value
-from app.daemon.notifier import notify_admin_of_failure
 from app.daemon.sql_safety import SQLSafetyError, strip_trailing_semicolon, validate_safe_select
-from app.db.session import engine as db_engine
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import ErrorDetail, RuleExecutionResult
+from app.db.session import engine as db_engine
+from app.db.session import metadata_engine
+from app.services.database_connections import target_engine
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
     except SQLSafetyError as exc:
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status="ERROR",
             result=None,
@@ -89,14 +92,15 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
 
     try:
         wrapped_sql = f"SELECT * FROM ({sql_body}) AS dq_rule_result LIMIT 2"
-        async with db_engine.connect() as conn:
-            async with conn.begin():
-                await conn.execute(text("SET TRANSACTION READ ONLY"))
-                await conn.execute(
-                    text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
-                )
-                query_result = await conn.execute(text(wrapped_sql))
-                rows = query_result.mappings().all()
+        async with _execution_engine(rule.database_connection_id) as active_engine:
+            async with active_engine.connect() as conn:
+                async with conn.begin():
+                    await conn.execute(text("SET TRANSACTION READ ONLY"))
+                    await conn.execute(
+                        text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
+                    )
+                    query_result = await conn.execute(text(wrapped_sql))
+                    rows = query_result.mappings().all()
 
         if len(rows) != 1:
             raise ResultShapeError(f"Expected exactly one result row, got {len(rows)}.")
@@ -115,10 +119,11 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
         status = evaluate_observed_value(observed_value, rule.expected_result)
 
         if observed_key == "violation_count" and observed_value > 0 and status == "FAIL":
-            violation_rows = await _fetch_violation_preview(sql_body)
+            violation_rows = await _fetch_violation_preview(sql_body, rule.database_connection_id)
 
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status=status,
             result={observed_key: _json_number(observed_value)},
@@ -131,6 +136,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
     except ResultShapeError as exc:
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status="ERROR",
             result=None,
@@ -142,6 +148,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
     except (ValueError, InvalidOperation) as exc:
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status="ERROR",
             result=None,
@@ -153,6 +160,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
     except SQLAlchemyError as exc:
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status="ERROR",
             result=None,
@@ -164,6 +172,7 @@ async def execute_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
     except Exception as exc:
         result = RuleExecutionResult(
             rule_id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
             rule_name=rule.rule_name,
             status="ERROR",
             result=None,
@@ -185,7 +194,8 @@ class ResultShapeError(Exception):
 async def _notify_if_needed(rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
     if result.status in {"FAIL", "ERROR"}:
         try:
-            await notify_admin_of_failure(rule, result)
+            from app.services.violations.aggregator import process_violation
+            await process_violation(rule, result)
         except Exception as exc:
             logger.error("Notification dispatch failed: %s", exc)
 
@@ -207,24 +217,37 @@ def _build_violation_preview_sql(sql_body: str, limit: int = 50) -> str | None:
     return f"SELECT * FROM {from_clause} WHERE {where_clause} LIMIT {limit}"
 
 
-async def _fetch_violation_preview(sql_body: str) -> list[dict[str, Any]]:
+async def _fetch_violation_preview(
+    sql_body: str,
+    database_connection_id: int | None = None,
+) -> list[dict[str, Any]]:
     preview_sql = _build_violation_preview_sql(sql_body)
     if preview_sql is None:
         return []
 
     settings = get_settings()
-    async with db_engine.connect() as conn:
-        async with conn.begin():
-            await conn.execute(text("SET TRANSACTION READ ONLY"))
-            await conn.execute(
-                text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
-            )
-            preview_result = await conn.execute(text(preview_sql))
-            return [_json_row(row) for row in preview_result.mappings().all()]
+    async with _execution_engine(database_connection_id) as active_engine:
+        async with active_engine.connect() as conn:
+            async with conn.begin():
+                await conn.execute(text("SET TRANSACTION READ ONLY"))
+                await conn.execute(
+                    text(f"SET LOCAL statement_timeout = '{settings.statement_timeout_ms}ms'")
+                )
+                preview_result = await conn.execute(text(preview_sql))
+                return [_json_row(row) for row in preview_result.mappings().all()]
 
 
 def _elapsed_ms(started: float) -> int:
     return max(0, round((time.perf_counter() - started) * 1000))
+
+
+@asynccontextmanager
+async def _execution_engine(database_connection_id: int | None):
+    if database_connection_id is None:
+        yield db_engine
+        return
+    async with target_engine(database_connection_id) as active_engine:
+        yield active_engine
 
 
 async def _persist_result(
@@ -238,12 +261,14 @@ async def _persist_result(
         error_message = f"{result.error.type}: {result.error.message}"
 
     try:
-        async with db_engine.begin() as conn:
+        persistence_engine = metadata_engine if rule.database_connection_id is not None else db_engine
+        async with persistence_engine.begin() as conn:
             await conn.execute(
                 text(
                     """
                     INSERT INTO dq_results.test_results (
                         rule_id,
+                        database_connection_id,
                         rule_name,
                         sql_text,
                         status,
@@ -255,6 +280,7 @@ async def _persist_result(
                     )
                     VALUES (
                         :rule_id,
+                        :database_connection_id,
                         :rule_name,
                         :sql_text,
                         :status,
@@ -268,6 +294,7 @@ async def _persist_result(
                 ),
                 {
                     "rule_id": rule.rule_id,
+                    "database_connection_id": rule.database_connection_id,
                     "rule_name": rule.rule_name,
                     "sql_text": rule.sql,
                     "status": result.status,

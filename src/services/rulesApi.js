@@ -87,6 +87,7 @@ export const normalizeRule = (rule = {}) => ({
   sql: rule.sql ?? rule.query ?? '',
   expectedResult: rule.expected_result ?? rule.expectedResult ?? { type: 'zero_violations' },
   scheduleCron: rule.schedule_cron ?? rule.scheduleCron ?? null,
+  severity: rule.severity ?? 'medium',
   isEnabled: rule.is_enabled ?? rule.isEnabled ?? true,
   createdAt: toIsoString(rule.created_at ?? rule.createdAt),
   status: rule.status ?? 'active',
@@ -173,6 +174,7 @@ export async function createSavedRule(payload) {
     expected_result: payload.expected_result ?? payload.expectedResult ?? { type: 'zero_violations' },
     schedule_cron: payload.schedule_cron ?? payload.scheduleCron ?? null,
     is_enabled: payload.is_enabled ?? payload.isEnabled ?? true,
+    severity: payload.severity ?? 'medium',
   };
 
   const { data } = await api.post('/rules', requestPayload);

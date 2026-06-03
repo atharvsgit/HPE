@@ -12,8 +12,21 @@ class ErrorDetail(BaseModel):
     message: str
 
 
+class AIEnrichment(BaseModel):
+    ai_summary: str | None = None
+    root_causes: list[str] = Field(default_factory=list)
+    suggested_fixes: list[str] = Field(default_factory=list)
+    confidence_score: str | None = None
+    prompt_version: str | None = None
+    provider_name: str | None = None
+    model_name: str | None = None
+    token_usage: int | None = None
+    parsing_failure: bool = False
+
+
 class RuleExecutionResult(BaseModel):
     rule_id: int | None = None
+    database_connection_id: int | None = None
     rule_name: str
     status: Literal["PASS", "FAIL", "ERROR"]
     result: dict[str, int | float] | None
@@ -22,15 +35,22 @@ class RuleExecutionResult(BaseModel):
     execution_time_ms: int
     executed_at: datetime
     error: ErrorDetail | None
+    ai_enrichment: AIEnrichment | None = None
 
 
 class SavedRuleResponse(BaseModel):
     rule_id: int
+    database_connection_id: int | None = None
+    database_name: str | None = None
+    table_name: str | None = None
     rule_name: str
     sql: str
     expected_result: ExpectedResult
+    schedule_text: str | None = None
     schedule_cron: str | None
+    notification_channels: list[str] = Field(default_factory=lambda: ["slack"])
     is_enabled: bool
+    severity: Literal["critical", "high", "medium", "low"]
     created_at: datetime
     updated_at: datetime
 

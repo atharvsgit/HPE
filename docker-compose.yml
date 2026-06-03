@@ -8,10 +8,16 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
       STATEMENT_TIMEOUT_MS: 15000
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_CHANNEL: ${SLACK_CHANNEL}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
       SMTP_SERVER: ${SMTP_SERVER:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -26,7 +32,7 @@ services:
       PROFILING_ROW_LIMIT: ${PROFILING_ROW_LIMIT:-100000}
       ANOMALY_CONTAMINATION: ${ANOMALY_CONTAMINATION:-0.05}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      PREFECT_SERVER_EPHEMERAL_ENABLED: ${PREFECT_SERVER_EPHEMERAL_ENABLED:-false}
+      PREFECT_SERVER_ALLOW_EPHEMERAL_MODE: ${PREFECT_SERVER_ALLOW_EPHEMERAL_MODE:-true}
     ports:
       - "8000:8000"
 
@@ -40,11 +46,46 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
       METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
       STATEMENT_TIMEOUT_MS: 15000
       RULE_EXECUTION_JITTER_SECONDS: ${RULE_EXECUTION_JITTER_SECONDS:-120}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_CHANNEL: ${SLACK_CHANNEL}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-5}
+      NOTIFICATION_HTTP_TIMEOUT_SECONDS: ${NOTIFICATION_HTTP_TIMEOUT_SECONDS:-5}
+      NOTIFICATION_EMAIL_FROM: ${NOTIFICATION_EMAIL_FROM:-alerts@dataqualitydaemon.local}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+
+  dispatcher:
+    build: .
+    container_name: dq_dispatcher
+    command: python -m app.daemon.dispatcher
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
       SMTP_SERVER: ${SMTP_SERVER:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -74,6 +115,51 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  redis:
+    image: redis:7
+    container_name: dq_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  llm_worker:
+    build: .
+    container_name: dq_llm_worker
+    command: celery -A app.daemon.worker worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dq_executor:${DQ_EXECUTOR_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      METADATA_DATABASE_URL: postgresql+asyncpg://dq_app:${DQ_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DQ_EXECUTOR_PASSWORD: ${DQ_EXECUTOR_PASSWORD}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-llama3-8b-8192}
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-5}
+      NOTIFICATION_HTTP_TIMEOUT_SECONDS: ${NOTIFICATION_HTTP_TIMEOUT_SECONDS:-5}
+      NOTIFICATION_EMAIL_FROM: ${NOTIFICATION_EMAIL_FROM:-alerts@dataqualitydaemon.local}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
 
 volumes:
   postgres_data:

@@ -5,7 +5,9 @@ from typing import Any
 
 from sqlalchemy import text
 
-from app.db.session import executor_engine
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.settings import get_settings
 from app.models.requests import DatabaseConnectionRequest
 from app.models.responses import DatabaseConnectionResponse
 
@@ -39,44 +41,48 @@ async def connect_database(request: DatabaseConnectionRequest) -> DatabaseConnec
     schema_name, table_name = _split_table_name(table_input)
     qualified_table = f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)}"
 
-    async with executor_engine.connect() as conn:
-        async with conn.begin():
-            await conn.execute(text("SET TRANSACTION READ ONLY"))
-            table_exists = await conn.execute(
-                text(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM information_schema.tables
+    engine = _engine_from_request(request)
+    try:
+        async with engine.connect() as conn:
+            async with conn.begin():
+                await conn.execute(text("SET TRANSACTION READ ONLY"))
+                table_exists = await conn.execute(
+                    text(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = :schema_name
+                              AND table_name = :table_name
+                        )
+                        """
+                    ),
+                    {"schema_name": schema_name, "table_name": table_name},
+                )
+
+                if not table_exists.scalar_one():
+                    raise ValueError(f"Table {schema_name}.{table_name} was not found.")
+
+                columns_result = await conn.execute(
+                    text(
+                        """
+                        SELECT
+                            column_name,
+                            data_type,
+                            is_nullable
+                        FROM information_schema.columns
                         WHERE table_schema = :schema_name
                           AND table_name = :table_name
-                    )
-                    """
-                ),
-                {"schema_name": schema_name, "table_name": table_name},
-            )
-
-            if not table_exists.scalar_one():
-                raise ValueError(f"Table {schema_name}.{table_name} was not found.")
-
-            columns_result = await conn.execute(
-                text(
-                    """
-                    SELECT
-                        column_name,
-                        data_type,
-                        is_nullable
-                    FROM information_schema.columns
-                    WHERE table_schema = :schema_name
-                      AND table_name = :table_name
-                    ORDER BY ordinal_position
-                    """
-                ),
-                {"schema_name": schema_name, "table_name": table_name},
-            )
-            row_count_result = await conn.execute(text(f"SELECT COUNT(*) FROM {qualified_table}"))
-            columns_rows = columns_result.mappings().all()
-            row_count = int(row_count_result.scalar_one())
+                        ORDER BY ordinal_position
+                        """
+                    ),
+                    {"schema_name": schema_name, "table_name": table_name},
+                )
+                row_count_result = await conn.execute(text(f"SELECT COUNT(*) FROM {qualified_table}"))
+                columns_rows = columns_result.mappings().all()
+                row_count = int(row_count_result.scalar_one())
+    finally:
+        await engine.dispose()
 
     columns = [
         {
@@ -102,4 +108,25 @@ async def connect_database(request: DatabaseConnectionRequest) -> DatabaseConnec
         schema=columns,
         rows=[],
         message=f"Connected to {schema_name}.{table_name} with {row_count} rows.",
+    )
+
+
+def _engine_from_request(request: DatabaseConnectionRequest):
+    from urllib.parse import quote_plus
+
+    settings = get_settings()
+    config = request.config
+    username = quote_plus(str(config.get("username") or "dq_executor"))
+    password = quote_plus(str(config.get("password") or ""))
+    host = str(config.get("host") or "postgres")
+    port = int(config.get("port") or 5432)
+    database = str(config.get("database") or "dq_test")
+    url = f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
+    return create_async_engine(
+        url,
+        pool_size=settings.pool_size,
+        max_overflow=settings.max_overflow,
+        pool_timeout=settings.pool_timeout,
+        pool_recycle=settings.pool_recycle,
+        pool_pre_ping=True,
     )

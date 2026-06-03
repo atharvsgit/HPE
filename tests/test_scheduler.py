@@ -16,6 +16,7 @@ def _saved_rule() -> SavedRuleResponse:
         expected_result=ExpectedResult(type="zero_violations"),
         schedule_cron="*/5 * * * *",
         is_enabled=True,
+        severity="medium",
         created_at=now,
         updated_at=now,
     )

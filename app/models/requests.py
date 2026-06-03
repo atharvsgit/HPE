@@ -25,17 +25,24 @@ class ExpectedResult(BaseModel):
 
 class RuleExecutionRequest(BaseModel):
     rule_id: int | None = None
+    database_connection_id: int | None = None
     rule_name: str = Field(..., min_length=1, max_length=300)
     sql: str = Field(..., min_length=1)
     expected_result: ExpectedResult
 
 
 class SavedRuleCreateRequest(BaseModel):
+    database_connection_id: int | None = None
     rule_name: str = Field(..., min_length=1, max_length=300)
     sql: str = Field(..., min_length=1)
     expected_result: ExpectedResult
     schedule_cron: str | None = None
+    schedule_text: str | None = None
+    table_name: str | None = None
+    notification_channels: list[Literal["slack", "email"]] = Field(default_factory=lambda: ["slack"])
+    source_prompt: str | None = None
     is_enabled: bool = True
+    severity: Literal["critical", "high", "medium", "low"] = "medium"
 
 
 class DatabaseConnectionRequest(BaseModel):

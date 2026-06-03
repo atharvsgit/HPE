@@ -10,6 +10,8 @@ from app.models.responses import ErrorDetail, RuleExecutionResult
 
 class NotificationSettings:
     slack_webhook_url = "http://slack.test"
+    slack_bot_token = None
+    slack_channel = None
     smtp_server = "smtp.test"
     smtp_port = 587
     smtp_username = "user"
@@ -80,25 +82,27 @@ async def test_notifies_slack_and_email_on_failure(
     assert sent_message["Subject"] == "Data Quality Alert: No active employee has negative salary"
     assert sent_message["To"] == "admin@test.com"
 
-    # Check multipart structure
     assert sent_message.is_multipart()
-    payloads = list(sent_message.iter_parts())
-    assert len(payloads) == 2
-    assert payloads[0].get_content_type() == "text/plain"
-    assert payloads[1].get_content_type() == "text/html"
+    payloads = list(sent_message.walk())
+    content_types = [part.get_content_type() for part in payloads]
+    assert "text/plain" in content_types
+    assert "text/html" in content_types
+    assert "text/csv" in content_types
 
-    # Check text content
-    text_body = payloads[0].get_content()
+    text_body = next(part.get_content() for part in payloads if part.get_content_type() == "text/plain")
     assert "DATA QUALITY RULE FAIL ALERT" in text_body
     assert "VIOLATION ROWS PREVIEW" in text_body
     assert "employee_id | salary" in text_body
 
-    # Check HTML content
-    html_body = payloads[1].get_content()
+    html_body = next(part.get_content() for part in payloads if part.get_content_type() == "text/html")
     assert "<!DOCTYPE html>" in html_body
     assert "No active employee has negative salary" in html_body
     assert "employee_id" in html_body
     assert "salary" in html_body
+
+    csv_attachment = next(part for part in payloads if part.get_content_type() == "text/csv")
+    assert csv_attachment.get_filename() == "rule_1_violations.csv"
+    assert "employee_id,salary" in csv_attachment.get_content()
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from app.daemon import executor, registry
 from app.daemon.cron import classify_scheduler_status, cron_to_trigger
 from app.db.session import close_db_engine
 from app.models.responses import RuleExecutionResult, SavedRuleResponse
+from app.services.schema_bootstrap import ensure_product_schema
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ async def execute_scheduled_rule(
 async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
     rules = await registry.list_rules()
     scheduled_count = 0
+    active_job_ids: set[str] = set()
 
     for rule in rules:
         scheduler_status = classify_scheduler_status(rule.is_enabled, rule.schedule_cron)
@@ -56,11 +58,13 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
             )
             continue
 
+        job_id = f"dq_rule_{rule.rule_id}"
+        active_job_ids.add(job_id)
         trigger = cron_to_trigger(rule.schedule_cron or "")
         scheduler.add_job(
             execute_scheduled_rule,
             trigger=trigger,
-            id=f"dq_rule_{rule.rule_id}",
+            id=job_id,
             name=rule.rule_name,
             args=[rule],
             coalesce=True,
@@ -76,8 +80,23 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
             rule.schedule_cron,
         )
 
+    for job in list(scheduler.get_jobs()):
+        if job.id.startswith("dq_rule_") and job.id not in active_job_ids:
+            scheduler.remove_job(job.id)
+            logger.info("Removed stale scheduled job %s", job.id)
+
     logger.info("Loaded %s schedulable rule(s)", scheduled_count)
     return scheduled_count
+
+
+async def refresh_scheduled_rules(
+    scheduler: AsyncIOScheduler,
+    interval_seconds: int = 60,
+) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        logger.info("Refreshing scheduled rules from backend registry")
+        await load_scheduled_rules(scheduler)
 
 
 async def run_scheduler_forever() -> None:
@@ -86,6 +105,7 @@ async def run_scheduler_forever() -> None:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
     logger.info("Starting Data Quality Daemon scheduler")
+    await ensure_product_schema()
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     stop_event = asyncio.Event()
@@ -100,12 +120,15 @@ async def run_scheduler_forever() -> None:
 
     await load_scheduled_rules(scheduler)
     scheduler.start()
+    refresh_task = asyncio.create_task(refresh_scheduled_rules(scheduler))
     logger.info("Scheduler started")
 
     try:
         await stop_event.wait()
     finally:
         logger.info("Stopping scheduler")
+        refresh_task.cancel()
+        await asyncio.gather(refresh_task, return_exceptions=True)
         scheduler.shutdown(wait=False)
         await close_db_engine()
 
