@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import asyncio
 from typing import Any
 
 import httpx
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.daemon.sql_safety import SQLSafetyError
 from app.db.session import metadata_engine
@@ -19,10 +21,25 @@ from app.services.database_connections import (
     target_engine,
 )
 from app.services.schedule_parser import parse_schedule_to_cron
+from app.services.schedule_preview import build_schedule_preview
 from app.services.runtime_settings import RuntimeAISettings, get_runtime_ai_settings
+from app.settings import get_settings
+
+
+PROMPT_INJECTION_PHRASES = {
+    "ignore previous instructions",
+    "system prompt",
+    "system command",
+    "you are now",
+    "developer message",
+    "drop table",
+    "delete all",
+    "always pass",
+}
 
 
 async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanResponse:
+    _reject_prompt_injection(request.prompt)
     database_id = request.database_id or await _default_database_id()
     database_row = await get_connection_row(database_id)
     if database_row is None:
@@ -36,6 +53,10 @@ async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanR
         raw_plan = _plan_with_heuristics(request.prompt, schema.model_dump(), database_row)
         source = "heuristic"
 
+    raw_schedule_cron = raw_plan.get("schedule_cron")
+    schedule_cron = str(raw_schedule_cron).strip() if raw_schedule_cron is not None else None
+    if schedule_cron == "":
+        schedule_cron = None
     sql = str(raw_plan["sql"]).strip().rstrip(";")
     validate_ai_generated_sql(sql)
     dry_run = await _dry_run_sql(database_id, sql)
@@ -50,13 +71,14 @@ async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanR
         sql=sql,
         expected_result=ExpectedResult(**raw_plan.get("expected_result", {"type": "zero_violations"})),
         schedule_text=raw_plan.get("schedule_text") or "manual",
-        schedule_cron=raw_plan.get("schedule_cron"),
+        schedule_cron=schedule_cron,
         severity=raw_plan.get("severity", "critical"),
         notification_channels=raw_plan.get("notification_channels") or ["slack"],
         explanation=raw_plan.get("explanation", "Generated from the natural language command."),
         confidence=raw_plan.get("confidence", "medium"),
         source=source,
         dry_run=dry_run,
+        schedule_preview=build_schedule_preview(schedule_cron),
     )
 
 
@@ -92,14 +114,21 @@ async def _plan_with_gemini(
         return None
 
     try:
-        client = genai.Client(api_key=ai_settings.api_key)
-        response = client.models.generate_content(
-            model=ai_settings.model,
-            contents=planner_prompt,
+        return await asyncio.wait_for(
+            asyncio.to_thread(_generate_gemini_plan, genai, planner_prompt, ai_settings),
+            timeout=get_settings().ai_planner_timeout_seconds,
         )
-        return _parse_json_object(response.text)
-    except Exception:
+    except (TimeoutError, Exception):
         return None
+
+
+def _generate_gemini_plan(genai: Any, planner_prompt: str, ai_settings: RuntimeAISettings) -> dict[str, Any]:
+    client = genai.Client(api_key=ai_settings.api_key)
+    response = client.models.generate_content(
+        model=ai_settings.model,
+        contents=planner_prompt,
+    )
+    return _parse_json_object(response.text)
 
 
 async def _plan_with_chat_provider(
@@ -142,7 +171,7 @@ async def _plan_with_chat_provider(
             payload["response_format"] = {"type": "json_object"}
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=get_settings().ai_planner_timeout_seconds) as client:
             response = await client.post(endpoint, headers=headers, json=payload)
             response.raise_for_status()
         data = response.json()
@@ -171,6 +200,8 @@ Rules:
 - Choose one table from the schema.
 - Generate a SELECT-only SQL query returning one numeric column aliased as violation_count.
 - The SQL must count rows that violate the user's requested condition.
+- For completeness checks such as "has a column/value" or "column is present", count rows where the column IS NULL.
+- For future-date checks, count rows where the date/timestamp column is greater than CURRENT_DATE.
 - Normalize the requested schedule into a 5-field cron expression when possible.
 - Use severity critical when the user asks for alerts or reports.
 - Return JSON only, no markdown.
@@ -199,7 +230,7 @@ def _plan_with_heuristics(
     schema_payload: dict[str, Any],
     database_row: dict[str, Any],
 ) -> dict[str, Any]:
-    text_prompt = prompt.lower()
+    text_prompt = _normalize_prompt(prompt.lower())
     tables = schema_payload.get("tables", [])
     if not tables:
         raise ValueError("No tables found in the selected database.")
@@ -215,6 +246,24 @@ def _plan_with_heuristics(
     if operator == "not_null":
         where_clause = f"{_quote(column['name'])} IS NULL"
         rule_name = f"{column['name']} not null check"
+    elif operator == "future_date":
+        where_clause = f"{_quote(column['name'])} > CURRENT_DATE"
+        rule_name = f"{column['name']} future date check"
+    elif operator == "outside_between" and isinstance(value, tuple):
+        low_value, high_value = value
+        where_clause = f"({_quote(column['name'])} < {low_value} OR {_quote(column['name'])} > {high_value})"
+        rule_name = f"{column['name']} range check"
+    elif operator == "inside_between" and isinstance(value, tuple):
+        low_value, high_value = value
+        where_clause = f"{_quote(column['name'])} BETWEEN {low_value} AND {high_value}"
+        rule_name = f"{column['name']} excluded range check"
+    elif operator == "not_equals" and isinstance(value, str):
+        escaped = value.replace("'", "''")
+        where_clause = f"{_quote(column['name'])} <> '{escaped}'"
+        rule_name = f"{column['name']} expected value check"
+    elif operator == "not_equals":
+        where_clause = f"{_quote(column['name'])} <> {value}"
+        rule_name = f"{column['name']} expected value check"
     elif isinstance(value, str):
         escaped = value.replace("'", "''")
         where_clause = f"{_quote(column['name'])} {operator} '{escaped}'"
@@ -259,28 +308,181 @@ def _choose_column(text_prompt: str, table: dict[str, Any]) -> dict[str, Any]:
     return table.get("columns", [])[0]
 
 
-def _condition_from_prompt(text_prompt: str, column: dict[str, Any]) -> tuple[str, int | float | str | None]:
-    if "not null" in text_prompt or "never be null" in text_prompt or "should not be null" in text_prompt:
+def _condition_from_prompt(
+    text_prompt: str,
+    column: dict[str, Any],
+) -> tuple[str, int | float | str | tuple[int, int] | None]:
+    null_phrases = [
+        "not null",
+        "never null",
+        "never be null",
+        "is never null",
+        "should not be null",
+        "must not be null",
+        "cannot be null",
+        "no null",
+    ]
+    if any(phrase in text_prompt for phrase in null_phrases):
         return "not_null", None
+    future_phrases = [
+        "in the future",
+        "future date",
+        "future-dated",
+        "after today",
+        "beyond today",
+    ]
+    if any(phrase in text_prompt for phrase in future_phrases):
+        return "future_date", None
     if "negative" in text_prompt:
         return "<", 0
 
-    number = _first_number(text_prompt)
+    between_values = _between_values(text_prompt)
+    if between_values is not None:
+        return ("inside_between" if _is_negative_constraint(text_prompt) else "outside_between"), between_values
+
+    positive_requirement = _is_positive_requirement(text_prompt)
     if any(term in text_prompt for term in ["less than", "below", "under", "<"]):
-        return "<", number or 0
+        number = _number_after_terms(text_prompt, ["less than", "below", "under", "<"]) or _first_number(text_prompt) or 0
+        return (">=" if positive_requirement else "<"), number
     if any(term in text_prompt for term in ["greater than", "above", "over", ">"]):
-        return ">", number or 0
+        number = _number_after_terms(text_prompt, ["greater than", "above", "over", ">"]) or _first_number(text_prompt) or 0
+        return ("<=" if positive_requirement else ">"), number
     if any(term in text_prompt for term in ["equals", "equal to", "is "]):
-        quoted = re.search(r"['\"]([^'\"]+)['\"]", text_prompt)
-        return "=", quoted.group(1) if quoted else (number or "")
-    return "<", number or 0
+        value = _equality_value(text_prompt)
+        if positive_requirement and value not in {None, ""}:
+            return "not_equals", value
+        return "=", value if value is not None else ""
+    column_names = {
+        str(column["name"]).lower(),
+        str(column["name"]).lower().replace("_", " "),
+    }
+    for column_name in column_names:
+        escaped_column = re.escape(column_name)
+        if re.search(rf"\b(?:has|have|having)\s+(?:a\s+|an\s+|the\s+)?{escaped_column}\b", text_prompt):
+            return "not_null", None
+        if re.search(rf"\b{escaped_column}\s+(?:exists|is present|is populated|has a value)\b", text_prompt):
+            return "not_null", None
+    return "<", _first_number(text_prompt) or 0
+
+
+def _reject_prompt_injection(prompt: str) -> None:
+    lowered = prompt.lower()
+    if any(phrase in lowered for phrase in PROMPT_INJECTION_PHRASES):
+        raise ValueError("Prompt appears to contain instruction-injection text. Rephrase it as a data quality rule only.")
+
+
+def _normalize_prompt(text_prompt: str) -> str:
+    replacements = {
+        r"\bearns?\b": "salary",
+        r"\bpay\b": "salary",
+        r"\bpaid\b": "salary",
+        r"\bcompensation\b": "salary",
+        r"\bwage\b": "salary",
+        r"\bsalry\b": "salary",
+        r"\bsallary\b": "salary",
+        r"\bjoined\b": "hired_at",
+        r"\bjoining date\b": "hired_at",
+        r"\bhire date\b": "hired_at",
+        r"\bdate of hire\b": "hired_at",
+        r"\bstart date\b": "hired_at",
+        r"\bteam\b": "department",
+        r"\bdept\b": "department",
+        r"\bdivision\b": "department",
+        r"\bemployee name\b": "full_name",
+        r"\bname\b": "full_name",
+        r"\bmarked as\b": "status is",
+        r"\bemployment state\b": "status",
+    }
+    normalized = text_prompt
+    for pattern, replacement in replacements.items():
+        normalized = re.sub(pattern, replacement, normalized)
+    return normalized
+
+
+def _is_positive_requirement(text_prompt: str) -> bool:
+    if _is_negative_constraint(text_prompt):
+        return False
+    return any(
+        phrase in text_prompt
+        for phrase in [
+            "should be",
+            "must be",
+            "has to be",
+            "needs to be",
+            "need to be",
+            "required to be",
+            "is expected to be",
+            "should have",
+            "must have",
+        ]
+    )
+
+
+def _is_negative_constraint(text_prompt: str) -> bool:
+    return any(
+        phrase in text_prompt
+        for phrase in [
+            "no ",
+            "nobody",
+            "none",
+            "never",
+            "should not",
+            "must not",
+            "cannot",
+            "can't",
+            "do not",
+            "does not",
+            "not be",
+            "not have",
+        ]
+    )
+
+
+def _between_values(text_prompt: str) -> tuple[int, int] | None:
+    match = re.search(r"\bbetween\s+(\d+)\s+(?:and|to|-)\s+(\d+)\b", text_prompt)
+    if match is None:
+        return None
+    first, second = int(match.group(1)), int(match.group(2))
+    return (min(first, second), max(first, second))
+
+
+def _number_after_terms(text_prompt: str, terms: list[str]) -> int | None:
+    for term in terms:
+        match = re.search(rf"{re.escape(term)}\s+(\d+)\b", text_prompt)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _equality_value(text_prompt: str) -> int | str | None:
+    quoted = re.search(r"['\"]([^'\"]+)['\"]", text_prompt)
+    if quoted:
+        return quoted.group(1)
+    for pattern in [
+        r"\bequal(?:s| to)?\s+([a-zA-Z_][a-zA-Z0-9_-]*)\b",
+        r"\bis\s+([a-zA-Z_][a-zA-Z0-9_-]*)\b",
+    ]:
+        match = re.search(pattern, text_prompt)
+        if match:
+            value = match.group(1)
+            if value not in {"not", "never", "null", "missing", "present", "populated"}:
+                return value
+    return _number_after_terms(text_prompt, ["equals", "equal to", "is"]) or _first_number(text_prompt)
 
 
 def _schedule_text_from_prompt(text_prompt: str) -> str:
-    match = re.search(r"every\s+((?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?\s*(?:minute|minutes|hour|hours|day|days|week|weeks|month|months))", text_prompt)
+    match = re.search(
+        r"\bevery\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
+        r"(?:minute|minutes|hour|hours|day|days|week|weeks|month|months)"
+        r"(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?",
+        text_prompt,
+    )
     if match:
-        return f"every {match.group(1).strip()}"
-    for word in ("daily", "weekly", "monthly"):
+        return match.group(0).strip()
+    daily_match = re.search(r"\bdaily(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?", text_prompt)
+    if daily_match:
+        return daily_match.group(0).strip()
+    for word in ("weekly", "monthly"):
         if word in text_prompt:
             return word
     return "manual"
@@ -298,13 +500,30 @@ def _first_number(text_prompt: str) -> int | None:
 
 
 async def _dry_run_sql(database_id: int, sql: str) -> dict[str, Any]:
-    async with target_engine(database_id) as engine:
-        async with engine.connect() as conn:
-            rows = (await conn.execute(text(f"SELECT * FROM ({sql}) AS plan_check LIMIT 2"))).mappings().all()
+    timeout_ms = get_settings().statement_timeout_ms
+    try:
+        async with target_engine(database_id) as engine:
+            async with engine.connect() as conn:
+                async with conn.begin():
+                    await conn.execute(text("SET TRANSACTION READ ONLY"))
+                    await conn.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
+                    rows = (await conn.execute(text(f"SELECT * FROM ({sql}) AS plan_check LIMIT 2"))).mappings().all()
+    except SQLAlchemyError as exc:
+        raise ValueError(_friendly_dry_run_error(exc)) from exc
     if len(rows) != 1:
         raise SQLSafetyError("Generated SQL must return exactly one row.", "AI_RESULT_SHAPE")
     row = dict(rows[0])
     return {"row": row}
+
+
+def _friendly_dry_run_error(exc: Exception) -> str:
+    message = str(exc)
+    lower_message = message.lower()
+    if "undefinedcolumnerror" in lower_message or "column" in lower_message and "does not exist" in lower_message:
+        return "Generated SQL references a column that does not exist in the selected database."
+    if "invaliddatetimeformaterror" in lower_message or "invalid input syntax for type date" in lower_message:
+        return "Generated SQL compared a date column to an invalid value. Try describing the date condition more explicitly."
+    return "Generated SQL failed validation against the selected database. Check that referenced columns and value types are valid."
 
 
 async def _log_generation(prompt: str, plan: dict[str, Any], source: str) -> int | None:

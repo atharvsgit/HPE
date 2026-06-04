@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from apscheduler.triggers.cron import CronTrigger
 
+from app.settings import get_settings
+
 
 class CronValidationError(ValueError):
     pass
@@ -16,9 +18,13 @@ class SchedulerStatus(StrEnum):
     INVALID_CRON = "invalid_cron"
 
 
+def _scheduler_timezone() -> str:
+    return get_settings().scheduler_timezone
+
+
 def cron_to_trigger(cron_expression: str) -> CronTrigger:
     validate_cron_expression(cron_expression)
-    return CronTrigger.from_crontab(cron_expression, timezone="UTC")
+    return CronTrigger.from_crontab(cron_expression, timezone=_scheduler_timezone())
 
 
 def validate_cron_expression(cron_expression: str | None) -> None:
@@ -34,7 +40,7 @@ def validate_cron_expression(cron_expression: str | None) -> None:
         )
 
     try:
-        CronTrigger.from_crontab(normalized, timezone="UTC")
+        CronTrigger.from_crontab(normalized, timezone=_scheduler_timezone())
     except ValueError as exc:
         raise CronValidationError(f"Invalid schedule_cron: {exc}") from exc
 

@@ -61,6 +61,16 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
         job_id = f"dq_rule_{rule.rule_id}"
         active_job_ids.add(job_id)
         trigger = cron_to_trigger(rule.schedule_cron or "")
+        existing_job = scheduler.get_job(job_id)
+        if existing_job is not None and _job_matches_rule(existing_job, trigger, rule):
+            scheduled_count += 1
+            logger.debug(
+                "Scheduled rule %s (%s) is unchanged",
+                rule.rule_id,
+                rule.rule_name,
+            )
+            continue
+
         scheduler.add_job(
             execute_scheduled_rule,
             trigger=trigger,
@@ -89,6 +99,18 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
     return scheduled_count
 
 
+def _job_matches_rule(job, trigger, rule: SavedRuleResponse) -> bool:
+    if str(job.trigger) != str(trigger):
+        return False
+    if not job.args:
+        return False
+    existing_rule = job.args[0]
+    return (
+        getattr(existing_rule, "rule_id", None) == rule.rule_id
+        and getattr(existing_rule, "updated_at", None) == rule.updated_at
+    )
+
+
 async def refresh_scheduled_rules(
     scheduler: AsyncIOScheduler,
     interval_seconds: int = 60,
@@ -96,7 +118,10 @@ async def refresh_scheduled_rules(
     while True:
         await asyncio.sleep(interval_seconds)
         logger.info("Refreshing scheduled rules from backend registry")
-        await load_scheduled_rules(scheduler)
+        try:
+            await load_scheduled_rules(scheduler)
+        except Exception:
+            logger.exception("Failed to refresh scheduled rules")
 
 
 async def run_scheduler_forever() -> None:
@@ -107,7 +132,7 @@ async def run_scheduler_forever() -> None:
     logger.info("Starting Data Quality Daemon scheduler")
     await ensure_product_schema()
 
-    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler = AsyncIOScheduler(timezone=get_settings().scheduler_timezone)
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

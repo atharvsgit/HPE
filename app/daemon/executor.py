@@ -306,5 +306,6 @@ async def _persist_result(
                 },
             )
     except Exception:
+        logger.exception("Failed to persist rule execution result for rule %s", rule.rule_name)
         # Persistence failure should not hide the rule execution outcome from the API caller.
         return

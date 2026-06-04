@@ -38,7 +38,7 @@ class ViolationBatch(BaseModel):
     last_seen: datetime
     total_occurrences: int
     total_violation_count: Decimal | None
-    status: Literal["open", "dispatched", "resolved", "failed"]
+    status: Literal["open", "dispatching", "enriched", "dispatched", "resolved", "failed"]
     ai_enrichment: dict[str, Any] | None = None
 
 

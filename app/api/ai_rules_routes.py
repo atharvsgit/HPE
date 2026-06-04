@@ -6,7 +6,7 @@ import logging
 
 from app.services.ai_rules.orchestrator import generate_ai_rule, get_generation, approve_generation
 from app.services.ai_rules.dry_run import dry_run_sql
-from app.services.ai_rules.validator import SQLSafetyError
+from app.services.ai_rules.validator import SQLSafetyError, validate_ai_generated_sql
 from app.services.ai_rules.sanitizer import PromptInjectionError
 from app.services.ai_rules.export import export_learning_dataset
 from app.services.ai_rules.scoring import update_rule_quality_scores
@@ -48,8 +48,11 @@ async def generate_rule(req: GenerateRequest):
 @ai_rules_router.post("/dry-run")
 async def dry_run_rule(req: DryRunRequest):
     try:
+        validate_ai_generated_sql(req.sql)
         result = await dry_run_sql(req.sql)
         return result
+    except SQLSafetyError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

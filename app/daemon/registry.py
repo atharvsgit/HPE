@@ -15,6 +15,8 @@ from app.models.responses import (
     SchedulerRuleStatusResponse,
 )
 
+UNSET = object()
+
 
 _RULE_SELECT = """
     SELECT
@@ -142,21 +144,22 @@ async def get_rule(rule_id: int) -> SavedRuleResponse | None:
 async def update_rule(
     rule_id: int,
     *,
-    schedule_text: str | None = None,
-    schedule_cron: str | None = None,
+    schedule_text=UNSET,
+    schedule_cron=UNSET,
     severity: str | None = None,
     notification_channels: list[str] | None = None,
     is_enabled: bool | None = None,
 ) -> SavedRuleResponse | None:
-    validate_cron_expression(schedule_cron)
+    if schedule_cron is not UNSET:
+        validate_cron_expression(schedule_cron)
 
     assignments = ["updated_at = NOW()"]
     params: dict = {"rule_id": rule_id}
 
-    if schedule_text is not None:
+    if schedule_text is not UNSET:
         assignments.append("schedule_text = :schedule_text")
         params["schedule_text"] = schedule_text
-    if schedule_cron is not None:
+    if schedule_cron is not UNSET:
         assignments.append("schedule_cron = :schedule_cron")
         params["schedule_cron"] = schedule_cron
     if severity is not None:
@@ -275,6 +278,7 @@ def execution_request_from_saved_rule(rule: SavedRuleResponse) -> RuleExecutionR
         rule_name=rule.rule_name,
         sql=rule.sql,
         expected_result=rule.expected_result,
+        notification_channels=rule.notification_channels,
     )
 
 

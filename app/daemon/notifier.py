@@ -5,9 +5,12 @@ import logging
 import smtplib
 import csv
 from io import StringIO
+from dataclasses import dataclass
 from email.message import EmailMessage
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     from slack_sdk.web.async_client import AsyncWebClient
@@ -19,12 +22,24 @@ from sqlalchemy import text
 
 from app.db.session import metadata_engine
 from app.models.requests import RuleExecutionRequest
-from app.models.responses import RuleExecutionResult
+from app.models.responses import AlertContext, RuleExecutionResult
 from app.services.runtime_settings import RuntimeNotificationSettings, get_runtime_notification_settings
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+@dataclass(frozen=True)
+class NotificationDispatchOutcome:
+    attempted: int = 0
+    sent: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+    @property
+    def any_sent(self) -> bool:
+        return self.sent > 0
 
 
 def _generate_ascii_table(rows: list[dict[str, Any]], max_rows: int = 10) -> str:
@@ -82,6 +97,105 @@ def _rule_id_slug(rule: RuleExecutionRequest, result: RuleExecutionResult) -> st
     return _rule_id_label(rule, result).replace(" ", "")
 
 
+def _result_observed_text(result: RuleExecutionResult) -> str:
+    if result.result is None:
+        return "N/A"
+    return ", ".join(f"{k}: {v}" for k, v in result.result.items())
+
+
+def _alert_context(result: RuleExecutionResult) -> AlertContext | None:
+    return getattr(result, "_alert_context", None)
+
+
+def _alert_context_lines(result: RuleExecutionResult) -> list[str]:
+    context = _alert_context(result)
+    if context is None or context.recent_failure_count is None:
+        return []
+
+    window_minutes = context.deduplication_window_minutes or 0
+    window_label = (
+        f"in the last {window_minutes} minutes"
+        if window_minutes > 0
+        else "for this execution"
+    )
+    failure_label = "execution" if context.recent_failure_count == 1 else "executions"
+    lines = [
+        f"Recent failed executions: {context.recent_failure_count} {failure_label} {window_label}."
+    ]
+
+    if context.recent_observed_total is not None:
+        observed_label = (
+            "Recent observed violation total"
+            if result.result and "violation_count" in result.result
+            else "Recent observed aggregate total"
+        )
+        lines.append(f"{observed_label}: {_format_number(context.recent_observed_total)}")
+
+    if context.window_started_at and context.window_ended_at:
+        lines.append(
+            "Window: "
+            f"{_format_display_time(context.window_started_at)} to "
+            f"{_format_display_time(context.window_ended_at)}"
+        )
+
+    if context.batch_id is not None:
+        batch_bits = [f"Violation batch ID: {context.batch_id}"]
+        if context.batch_occurrences is not None:
+            occurrence_label = "occurrence" if context.batch_occurrences == 1 else "occurrences"
+            batch_bits.append(f"{context.batch_occurrences} {occurrence_label}")
+        if context.batch_violation_count is not None:
+            batch_bits.append(
+                f"batch violation total: {_format_number(context.batch_violation_count)}"
+            )
+        lines.append("Current alert batch: " + ", ".join(batch_bits))
+
+    return lines
+
+
+def _slack_file_initial_comment(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
+    lines = [
+        f"DATA QUALITY RULE {result.status} ALERT",
+        f"Rule: {rule.rule_name}",
+        f"Rule ID: {_rule_id_label(rule, result)}",
+        f"Status: {result.status}",
+        f"Executed At: {result.executed_at.isoformat()}",
+        f"Observed result: {_result_observed_text(result)}",
+    ]
+
+    context_lines = _alert_context_lines(result)
+    if context_lines:
+        lines.extend(["", "Recent failure summary:", *context_lines])
+
+    if result.violation_rows:
+        lines.extend([
+            "",
+            f"Violation rows CSV attached ({len(result.violation_rows)} preview rows).",
+        ])
+
+    return "\n".join(lines)
+
+
+def _format_display_time(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(_notification_timezone()).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def _notification_timezone() -> ZoneInfo:
+    timezone_name = "Asia/Kolkata"
+    try:
+        timezone_name = getattr(get_settings(), "scheduler_timezone", timezone_name) or timezone_name
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def _format_number(value: int | float) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) -> str:
     table_name = _table_from_sql(rule.sql)
     lines = [
@@ -104,8 +218,11 @@ def _notification_text(rule: RuleExecutionRequest, result: RuleExecutionResult) 
         lines.append(f"Expected value: {rule.expected_result.value}")
 
     if result.result is not None:
-        observed_val = ", ".join(f"{k}: {v}" for k, v in result.result.items())
-        lines.append(f"Observed result: {observed_val}")
+        lines.append(f"Observed result: {_result_observed_text(result)}")
+
+    context_lines = _alert_context_lines(result)
+    if context_lines:
+        lines.extend(["", "-- RECENT FAILURE SUMMARY ---------------", *context_lines])
 
     if result.error is not None:
         lines.extend([
@@ -158,9 +275,25 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
 
     observed_val = ""
     if result.result is not None:
-        observed_val = ", ".join(f"{k}: {v}" for k, v in result.result.items())
+        observed_val = _result_observed_text(result)
     else:
         observed_val = "N/A"
+
+    summary_html = ""
+    context_lines = _alert_context_lines(result)
+    if context_lines:
+        summary_items = "".join(
+            f"<li style=\"margin-bottom: 6px;\">{html.escape(line)}</li>"
+            for line in context_lines
+        )
+        summary_html = f"""
+        <div style="margin-bottom: 25px; border: 1px solid #bae6fd; background-color: #f0f9ff; border-radius: 6px; padding: 15px;">
+            <h3 style="margin-top: 0; color: #075985; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Recent Failure Summary</h3>
+            <ul style="margin: 0; padding-left: 18px; color: #0f172a; font-size: 13px; line-height: 1.5;">
+                {summary_items}
+            </ul>
+        </div>
+        """
 
     error_html = ""
     if result.error:
@@ -278,6 +411,8 @@ def _notification_html(rule: RuleExecutionRequest, result: RuleExecutionResult) 
                 </tr>
             </table>
 
+            {summary_html}
+
             {error_html}
 
             <!-- Violation Rows -->
@@ -301,10 +436,41 @@ async def _send_slack_notification(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
     settings: RuntimeNotificationSettings,
-) -> None:
+) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=settings.notification_http_timeout_seconds) as client:
+        bot_token = getattr(settings, "slack_bot_token", None)
+        channel = getattr(settings, "slack_channel", None)
+        if result.violation_rows and bot_token and channel:
+            if AsyncWebClient is None:
+                logger.error("Slack file upload skipped: slack_sdk is not installed.")
+            else:
+                slack_client = AsyncWebClient(token=bot_token)
+                upload_response = await slack_client.files_upload_v2(
+                    channel=channel,
+                    filename=f"rule_{_rule_id_slug(rule, result)}_violations.csv",
+                    title=f"Violation Rows - {rule.rule_name}",
+                    content=_violation_csv(result.violation_rows),
+                    initial_comment=_slack_file_initial_comment(rule, result),
+                )
 
+                upload_json = _slack_response_payload(upload_response)
+                if upload_json.get("ok"):
+                    logger.info(
+                        "Sent Slack violation file notification for rule %s.",
+                        rule.rule_name,
+                    )
+                    await _record_delivery(rule, "slack", "sent", None)
+                    return True
+                logger.error("Slack file upload failed: %s", upload_json)
+
+        if not settings.slack_webhook_url:
+            logger.warning(
+                "Slack alert skipped: SLACK_WEBHOOK_URL is missing and no Slack file upload was sent."
+            )
+            await _record_delivery(rule, "slack", "failed", "Slack delivery is not configured.")
+            return False
+
+        async with httpx.AsyncClient(timeout=settings.notification_http_timeout_seconds) as client:
             response = await client.post(
                 settings.slack_webhook_url,
                 json={
@@ -313,34 +479,12 @@ async def _send_slack_notification(
             )
             response.raise_for_status()
 
-            bot_token = getattr(settings, "slack_bot_token", None)
-            channel = getattr(settings, "slack_channel", None)
-            if result.violation_rows and bot_token and channel:
-                if AsyncWebClient is None:
-                    logger.error("Slack file upload skipped: slack_sdk is not installed.")
-                    return
-                slack_client = AsyncWebClient(token=bot_token)
-
-                upload_response = await slack_client.files_upload_v2(
-                    channel=channel,
-                    filename=f"rule_{_rule_id_slug(rule, result)}_violations.csv",
-                    title=f"Violation Rows - {rule.rule_name}",
-                    content=_violation_csv(result.violation_rows),
-                    initial_comment=f"Violation CSV for rule: {rule.rule_name}",
-                )
-
-                upload_json = upload_response.json()
-                if not upload_json.get("ok"):
-                    logger.error(
-                        "Slack file upload failed: %s",
-                        upload_json
-                    )
-
         logger.info(
             "Sent Slack notification for rule %s.",
             rule.rule_name,
         )
         await _record_delivery(rule, "slack", "sent", None)
+        return True
 
     except Exception as exc:
         logger.error(
@@ -348,6 +492,21 @@ async def _send_slack_notification(
             exc,
         )
         await _record_delivery(rule, "slack", "failed", str(exc))
+        return False
+
+
+def _slack_response_payload(response: Any) -> dict[str, Any]:
+    if isinstance(response, dict):
+        return response
+    data = getattr(response, "data", None)
+    if isinstance(data, dict):
+        return data
+    if hasattr(response, "get"):
+        try:
+            return {"ok": bool(response.get("ok")), "response": response}
+        except Exception:
+            return {"ok": False, "response": str(response)}
+    return {"ok": False, "response": str(response)}
 
 
 def _send_email_notification_sync(
@@ -404,9 +563,10 @@ async def _send_email_notification(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
     settings: RuntimeNotificationSettings,
-) -> None:
+) -> bool:
     error = await asyncio.to_thread(_send_email_notification_sync, rule, result, settings)
     await _record_delivery(rule, "email", "failed" if error else "sent", error)
+    return error is None
 
 
 async def _record_delivery(
@@ -438,14 +598,19 @@ async def _record_delivery(
 async def notify_admin_of_failure(
     rule: RuleExecutionRequest,
     result: RuleExecutionResult,
-) -> None:
+) -> NotificationDispatchOutcome:
     if result.status not in {"FAIL", "ERROR"}:
-        return
+        return NotificationDispatchOutcome()
 
     settings = await _settings_for_notifications()
+    channels = set(rule.notification_channels or ["slack", "email"])
     tasks = []
 
-    if settings.slack_webhook_url:
+    slack_configured = bool(
+        settings.slack_webhook_url
+        or (getattr(settings, "slack_bot_token", None) and getattr(settings, "slack_channel", None))
+    )
+    if "slack" in channels and slack_configured:
         tasks.append(
             _send_slack_notification(
                 rule,
@@ -454,18 +619,25 @@ async def notify_admin_of_failure(
             )
         )
 
-    if settings.smtp_server:
+    if "email" in channels and settings.smtp_server:
         tasks.append(_send_email_notification(rule, result, settings))
 
     if not tasks:
         logger.warning(
-            "Rule %s ended with %s, but no notification channels are configured.",
+            "Rule %s ended with %s, but no notification channels are configured for its requested channels.",
             rule.rule_name,
             result.status,
         )
-        return
+        return NotificationDispatchOutcome(skipped=len(channels) or 1)
 
-    await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    sent = sum(1 for item in results if item is True)
+    failed = len(results) - sent
+    return NotificationDispatchOutcome(
+        attempted=len(results),
+        sent=sent,
+        failed=failed,
+    )
 
 
 async def _settings_for_notifications():

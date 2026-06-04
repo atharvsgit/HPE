@@ -1,6 +1,7 @@
 # Local environment and secrets
 .env
 .env.*
+.env-backup
 !.env.example
 
 # Python cache and test output
@@ -19,6 +20,7 @@ env/
 # Node frontend dependencies and builds
 node_modules/
 dist/
+.vite/
 
 # Local editor and OS files
 .vscode/

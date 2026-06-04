@@ -8,7 +8,7 @@ export const deleteDatabase = async (id) => {
   await api.delete(`/databases/${id}`);
 };
 
-export const planCommand = async (payload) => (await api.post('/assistant/plan', payload)).data;
+export const planCommand = async (payload) => (await api.post('/assistant/plan', payload, { timeout: 45000 })).data;
 export const approvePlan = async (plan) => (await api.post('/assistant/approve', { plan })).data;
 
 export const getDashboardSummary = async () => (await api.get('/dashboard/summary')).data;

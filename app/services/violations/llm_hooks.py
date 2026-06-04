@@ -45,6 +45,7 @@ def enqueue_batch_dispatch(batch_id: int, rule: RuleExecutionRequest) -> bool:
                 "type": rule.expected_result.type,
                 "value": rule.expected_result.value,
             },
+            "notification_channels": rule.notification_channels,
         }
 
         task = process_batch_dispatch_task.delay(batch_id, rule_dict)

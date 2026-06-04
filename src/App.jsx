@@ -70,6 +70,24 @@ const exampleCommands = [
   'Check department is not null in employees every day',
 ];
 
+const schedulePresetOptions = [
+  { label: 'Custom text', value: '__custom' },
+  { label: 'Manual only', value: '' },
+  { label: 'Every minute', value: 'every minute' },
+  { label: 'Every 5 minutes', value: 'every 5 minutes' },
+  { label: 'Every 15 minutes', value: 'every 15 minutes' },
+  { label: 'Hourly', value: 'every hour' },
+  { label: 'Daily at 9:00 AM', value: 'every day at 9:00 am' },
+  { label: 'Daily at 10:30 AM', value: 'every day at 10:30 am' },
+  { label: 'Weekly', value: 'weekly' },
+  { label: 'Monthly', value: 'monthly' },
+];
+
+const notificationChannelOptions = [
+  { label: 'Slack', value: 'slack' },
+  { label: 'Email', value: 'email' },
+];
+
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem('hpe-theme') || 'light');
 
@@ -481,7 +499,7 @@ function Databases({ databases, form, setForm, schema, busy, onAdd, onTest, onSc
             <input type="password" value={form.password} onChange={(event) => update('password', event.target.value)} />
           </Field>
         </div>
-        <div className="button-row">
+        <div className="button-row form-actions">
           <button disabled={busy} className="primary-button" type="button" onClick={onAdd}>
             Save Database
           </button>
@@ -538,6 +556,19 @@ function Databases({ databases, form, setForm, schema, busy, onAdd, onTest, onSc
 }
 
 function AICommand({ command, setCommand, databases, selectedDatabaseId, setSelectedDatabaseId, plan, busy, onPlan, onApprove, onVoice }) {
+  const [previewTimezone, setPreviewTimezone] = useState('Asia/Kolkata');
+  const previewTimezones = plan?.schedule_preview?.timezones || [];
+  const selectedTimezonePreview =
+    previewTimezones.find((item) => item.timezone === previewTimezone) ||
+    previewTimezones[0] ||
+    null;
+
+  useEffect(() => {
+    if (plan?.schedule_preview?.scheduler_timezone) {
+      setPreviewTimezone(plan.schedule_preview.scheduler_timezone);
+    }
+  }, [plan?.generation_id, plan?.schedule_preview?.scheduler_timezone]);
+
   return (
     <div className="workspace-grid">
       <section className="panel-card span-7">
@@ -559,7 +590,7 @@ function AICommand({ command, setCommand, databases, selectedDatabaseId, setSele
             />
           </Field>
         </div>
-        <div className="button-row">
+        <div className="button-row form-actions">
           <button className="primary-button" type="button" disabled={busy || !command.trim()} onClick={onPlan}>
             Generate Plan
           </button>
@@ -586,11 +617,39 @@ function AICommand({ command, setCommand, databases, selectedDatabaseId, setSele
           <div className="review-grid">
             <InfoCard label="Database" value={plan.database_name} />
             <InfoCard label="Table" value={plan.table_name} />
-            <InfoCard label="Schedule" value={plan.schedule_text || plan.schedule_cron || 'Manual'} />
+            <InfoCard label="Schedule" value={plan.schedule_text || 'Manual'} />
+            {plan.schedule_cron && <InfoCard label="Cron" value={plan.schedule_cron} />}
+            {plan.schedule_preview?.scheduler_timezone && (
+              <InfoCard label="Scheduler TZ" value={plan.schedule_preview.scheduler_timezone} />
+            )}
             <InfoCard label="Severity" value={plan.severity} />
             <InfoCard label="Planner" value={`${plan.source} (${plan.confidence} confidence)`} />
             <InfoCard label="Dry Run" value={formatDryRun(plan.dry_run)} />
           </div>
+          {plan.schedule_preview?.timezones?.length ? (
+            <>
+              <div className="review-toolbar">
+                <Field label="Preview timezone">
+                  <select value={previewTimezone} onChange={(event) => setPreviewTimezone(event.target.value)}>
+                    {previewTimezones.map((item) => (
+                      <option key={item.timezone} value={item.timezone}>
+                        {item.label} ({item.timezone})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <InfoCard
+                  label={`Selected next run ${selectedTimezonePreview?.label || ''}`}
+                  value={selectedTimezonePreview?.display || 'No scheduled run'}
+                />
+              </div>
+              <div className="review-grid">
+                {plan.schedule_preview.timezones.map((item) => (
+                  <InfoCard key={item.timezone} label={`Next run ${item.label}`} value={item.display} />
+                ))}
+              </div>
+            </>
+          ) : null}
           <pre className="sql-box">{plan.sql}</pre>
           <p className="muted-copy">{plan.explanation}</p>
           <div className="button-row">
@@ -613,7 +672,7 @@ function Jobs({ jobs, busy, onRun, onPause, onResume, onDelete, onUpdate }) {
     onUpdate(job.id, {
       schedule_text: draft.schedule_text ?? job.schedule_text ?? '',
       severity: draft.severity ?? job.severity,
-      notification_channels: job.notification_channels || ['slack'],
+      notification_channels: draft.notification_channels ?? job.notification_channels ?? ['slack'],
       is_enabled: job.is_enabled,
     });
   };
@@ -621,9 +680,11 @@ function Jobs({ jobs, busy, onRun, onPause, onResume, onDelete, onUpdate }) {
   return (
     <section className="panel-card span-all">
       <PanelHeader title="Orchestrator Jobs" subtitle="These are real saved rules loaded from the backend registry." />
-      <div className="job-list">
+      <div className="job-list compact-jobs">
         {jobs.map((job) => {
           const draft = drafts[job.id] || {};
+          const scheduleText = draft.schedule_text ?? job.schedule_text ?? '';
+          const channels = draft.notification_channels ?? job.notification_channels ?? ['slack'];
           return (
             <article className="job-card" key={job.id}>
               <div className="card-title-row">
@@ -650,11 +711,27 @@ function Jobs({ jobs, busy, onRun, onPause, onResume, onDelete, onUpdate }) {
               <pre className="sql-box compact">{job.sql}</pre>
 
               <div className="job-editor-grid">
-                <Field label="Natural language schedule">
+                <Field label="Schedule preset">
+                  <select
+                    value={schedulePresetValue(scheduleText)}
+                    onChange={(event) => {
+                      if (event.target.value !== '__custom') {
+                        updateDraft(job.id, 'schedule_text', event.target.value);
+                      }
+                    }}
+                  >
+                    {schedulePresetOptions.map((option) => (
+                      <option key={option.value || 'manual'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Schedule text">
                   <input
-                    value={draft.schedule_text ?? job.schedule_text ?? job.schedule_cron ?? ''}
+                    value={scheduleText}
                     onChange={(event) => updateDraft(job.id, 'schedule_text', event.target.value)}
-                    placeholder="every day"
+                    placeholder="manual, every 5 minutes, every day at 10:30 am"
                   />
                 </Field>
                 <Field label="Severity">
@@ -662,9 +739,24 @@ function Jobs({ jobs, busy, onRun, onPause, onResume, onDelete, onUpdate }) {
                     {['critical', 'high', 'medium', 'low'].map((severity) => <option key={severity}>{severity}</option>)}
                   </select>
                 </Field>
+                <div className="field">
+                  <span>Notifications</span>
+                  <div className="checkbox-row">
+                    {notificationChannelOptions.map((channel) => (
+                      <label className="mini-check" key={channel.value}>
+                        <input
+                          type="checkbox"
+                          checked={channels.includes(channel.value)}
+                          onChange={() => updateDraft(job.id, 'notification_channels', toggleChannel(channels, channel.value))}
+                        />
+                        <span>{channel.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              <div className="button-row">
+              <div className="button-row job-actions">
                 <button disabled={busy} className="secondary-button" onClick={() => onRun(job.id)} type="button">Run Now</button>
                 <button disabled={busy} className="secondary-button" onClick={() => job.is_enabled ? onPause(job.id) : onResume(job.id)} type="button">
                   {job.is_enabled ? 'Pause' : 'Resume'}
@@ -700,9 +792,9 @@ function Alerts({ alerts, notifications }) {
         </div>
       </section>
 
-      <section className="panel-card span-5">
+      <section className="panel-card span-5 delivery-panel">
         <PanelHeader title="Notification Delivery" subtitle="Slack and email send results recorded by the backend." />
-        <div className="stack-list">
+        <div className="stack-list delivery-log">
           {notifications.slice(0, 30).map((notification) => (
             <CompactRow
               key={notification.id}
@@ -832,7 +924,7 @@ function Settings({ theme, setTheme, databases, sentCount, failedCount, appSetti
             <small>Fallback planner stays internal if the provider is unavailable.</small>
           </div>
         </div>
-        <div className="button-row">
+        <div className="button-row form-actions">
           <button className="primary-button" type="button" disabled={busy} onClick={saveAI}>
             Save AI Settings
           </button>
@@ -1058,6 +1150,21 @@ function SunIcon() {
       <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" />
     </svg>
   );
+}
+
+function schedulePresetValue(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  const matchedPreset = schedulePresetOptions.find((option) => option.value === normalized);
+  return matchedPreset ? matchedPreset.value : '__custom';
+}
+
+function toggleChannel(channels, channel) {
+  const currentChannels = Array.isArray(channels) ? channels : [];
+  if (currentChannels.includes(channel)) {
+    const remaining = currentChannels.filter((item) => item !== channel);
+    return remaining.length ? remaining : [channel];
+  }
+  return [...currentChannels, channel];
 }
 
 function formatDryRun(dryRun) {

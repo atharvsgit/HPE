@@ -100,6 +100,8 @@ async def get_settings_payload() -> dict[str, Any]:
     smtp_use_tls = _bool_value(values.get("smtp_use_tls"), settings.smtp_use_tls)
     smtp_password = values.get("smtp_password") or settings.smtp_password or ""
     slack_webhook = values.get("slack_webhook_url") or settings.slack_webhook_url or ""
+    slack_bot_token = values.get("slack_bot_token") or settings.slack_bot_token or ""
+    slack_channel = values.get("slack_channel") or settings.slack_channel or ""
 
     return {
         "ai": {
@@ -121,7 +123,7 @@ async def get_settings_payload() -> dict[str, Any]:
             "smtp_use_tls": smtp_use_tls,
             "has_smtp_password": bool(smtp_password),
             "masked_smtp_password": _mask_secret(smtp_password),
-            "slack_configured": bool(slack_webhook),
+            "slack_configured": bool(slack_webhook or (slack_bot_token and slack_channel)),
             "masked_slack_webhook": _mask_secret(slack_webhook),
         },
     }

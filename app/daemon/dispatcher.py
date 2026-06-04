@@ -8,6 +8,7 @@ from app.daemon.notifier import notify_admin_of_failure
 from app.db.session import metadata_engine as db_engine
 from app.models.requests import RuleExecutionRequest, ExpectedResult
 from app.services.violations.llm_hooks import enqueue_batch_dispatch, enrich_batch_with_ai_summary
+from app.services.violations.alert_context import attach_alert_context
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,14 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
             
         # 2. Fetch rule details to construct a pseudo-request/result for the notifier
         rule_row = (await conn.execute(
-            text("SELECT database_connection_id, rule_name, sql_text, expected_result_type, expected_result_value FROM dq_config.dq_rules WHERE rule_id = :rule_id"),
+            text(
+                """
+                SELECT database_connection_id, rule_name, sql_text, expected_result_type,
+                       expected_result_value, notification_channels
+                FROM dq_config.dq_rules
+                WHERE rule_id = :rule_id
+                """
+            ),
             {"rule_id": rule_id}
         )).mappings().first()
         
@@ -85,7 +93,8 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
         expected_result=ExpectedResult(
             type=rule_row["expected_result_type"],
             value=rule_row["expected_result_value"]
-        )
+        ),
+        notification_channels=_json_list(rule_row["notification_channels"]),
     )
 
     # For the result, we can just pass a dummy result indicating a batch failure
@@ -102,18 +111,10 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
         executed_at=datetime.now(UTC),
         error=None
     )
+    await attach_alert_context(pseudo_result, rule_id=rule_id, batch_id=batch_id)
 
     # --- Integration point: enqueue async Celery LLM enrichment task ---
     # llm_hooks.enqueue_batch_dispatch → worker.py → orchestrator.py → notifier
-    rule_dict_for_worker = {
-        "rule_id": rule_id,
-        "rule_name": pseudo_rule.rule_name,
-        "sql": pseudo_rule.sql,
-        "expected_result": {
-            "type": pseudo_rule.expected_result.type,
-            "value": pseudo_rule.expected_result.value,
-        },
-    }
     enqueued = enqueue_batch_dispatch(batch_id, pseudo_rule)
     if enqueued:
         logger.info("Batch %s enqueued for async LLM dispatch.", batch_id)
@@ -127,8 +128,8 @@ async def _dispatch_single_batch(batch_id: int, rule_id: int) -> None:
         pseudo_result.ai_enrichment = ai_enrichment
 
     try:
-        await notify_admin_of_failure(pseudo_rule, pseudo_result)
-        new_status = 'dispatched'
+        outcome = await notify_admin_of_failure(pseudo_rule, pseudo_result)
+        new_status = 'dispatched' if outcome.any_sent else 'failed'
     except Exception as exc:
         logger.error("Failed to dispatch batch %s: %s", batch_id, exc)
         new_status = 'failed'
@@ -154,6 +155,22 @@ async def run_dispatcher_loop() -> None:
             logger.error(f"Error in dispatcher loop: {exc}")
         
         await asyncio.sleep(60)  # Check every minute
+
+
+def _json_list(value) -> list[str]:
+    import json
+
+    if value is None:
+        return ["slack", "email"]
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else ["slack", "email"]
+        except json.JSONDecodeError:
+            return ["slack", "email"]
+    return list(value)
 
 
 if __name__ == "__main__":

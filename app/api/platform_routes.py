@@ -478,7 +478,7 @@ async def run_drift_detection(request: DriftDetectionRequest) -> DriftResultResp
     """
     Compare *reference_table* against *current_table* for drift in *columns*.
 
-    Uses Evidently AI's ``ColumnDriftMetric`` and ``DatasetDriftMetric``.
+    Uses the current lightweight numeric mean-shift drift detector.
     """
     try:
         drift_result = await detect_drift(

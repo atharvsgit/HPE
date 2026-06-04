@@ -29,6 +29,9 @@ class RuleExecutionRequest(BaseModel):
     rule_name: str = Field(..., min_length=1, max_length=300)
     sql: str = Field(..., min_length=1)
     expected_result: ExpectedResult
+    notification_channels: list[Literal["slack", "email"]] = Field(
+        default_factory=lambda: ["slack", "email"]
+    )
 
 
 class SavedRuleCreateRequest(BaseModel):

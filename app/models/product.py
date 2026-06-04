@@ -62,6 +62,20 @@ class AssistantPlanRequest(BaseModel):
     database_id: int | None = None
 
 
+class SchedulePreviewItem(BaseModel):
+    label: str
+    timezone: str
+    next_run_at: datetime
+    display: str
+
+
+class SchedulePreview(BaseModel):
+    scheduler_timezone: str
+    cron: str
+    next_run_at: datetime
+    timezones: list[SchedulePreviewItem]
+
+
 class AssistantPlanResponse(BaseModel):
     generation_id: int | None = None
     database_id: int
@@ -78,6 +92,7 @@ class AssistantPlanResponse(BaseModel):
     confidence: Literal["high", "medium", "low"]
     source: Literal["gemini", "openai", "anthropic", "openrouter", "groq", "heuristic"]
     dry_run: dict[str, Any] | None = None
+    schedule_preview: SchedulePreview | None = None
 
 
 class AssistantApproveRequest(BaseModel):

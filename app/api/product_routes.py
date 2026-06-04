@@ -34,7 +34,7 @@ from app.services.database_connections import (
     list_database_connections,
     test_database_connection,
 )
-from app.services.schedule_parser import parse_schedule_to_cron
+from app.services.schedule_parser import ScheduleParseError, parse_schedule_to_cron
 from app.services.runtime_settings import (
     get_settings_payload,
     save_ai_settings,
@@ -127,8 +127,8 @@ async def list_jobs() -> list[JobResponse]:
 
 @product_router.post("/orchestrator/jobs", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(request: JobCreateRequest) -> JobResponse:
-    schedule_cron = request.schedule_cron or parse_schedule_to_cron(request.schedule_text)
     try:
+        schedule_cron = request.schedule_cron or parse_schedule_to_cron(request.schedule_text)
         rule = await registry.create_rule(
             SavedRuleCreateRequest(
                 database_connection_id=request.database_connection_id,
@@ -144,27 +144,33 @@ async def create_job(request: JobCreateRequest) -> JobResponse:
                 table_name=request.table_name,
             )
         )
-    except (CronValidationError, SQLSafetyError) as exc:
+    except (CronValidationError, ScheduleParseError, SQLSafetyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await _job_from_rule(rule)
 
 
 @product_router.patch("/orchestrator/jobs/{job_id}", response_model=JobResponse)
 async def update_job(job_id: int, request: JobUpdateRequest) -> JobResponse:
-    schedule_cron = request.schedule_cron
-    if schedule_cron is None and request.schedule_text is not None:
-        schedule_cron = parse_schedule_to_cron(request.schedule_text)
+    provided_fields = request.model_fields_set
+    schedule_text = registry.UNSET
+    schedule_cron = registry.UNSET
 
     try:
+        if "schedule_text" in provided_fields:
+            schedule_text = _clean_schedule_text(request.schedule_text)
+            schedule_cron = parse_schedule_to_cron(schedule_text)
+        elif "schedule_cron" in provided_fields:
+            schedule_cron = request.schedule_cron
+
         rule = await registry.update_rule(
             job_id,
-            schedule_text=request.schedule_text,
+            schedule_text=schedule_text,
             schedule_cron=schedule_cron,
             severity=request.severity,
             notification_channels=request.notification_channels,
             is_enabled=request.is_enabled,
         )
-    except CronValidationError as exc:
+    except (CronValidationError, ScheduleParseError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if rule is None:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -316,3 +322,10 @@ def _json_number(value):
     except AttributeError:
         return value
     return float(value)
+
+
+def _clean_schedule_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None

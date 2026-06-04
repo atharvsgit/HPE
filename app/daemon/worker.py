@@ -10,8 +10,8 @@ This module defines the Celery application and the single task
                                                               → failed
   4. Sends notification (enriched or plain fallback).
 
-IMPORTANT: No synchronous LLM calls exist in the aggregator or dispatcher.
-All LLM work happens exclusively here, in the Celery worker process.
+The dispatcher can enqueue this worker for asynchronous enrichment. Some
+prototype paths still fall back to inline enrichment when the queue is not used.
 """
 from __future__ import annotations
 
@@ -103,6 +103,7 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
     from app.models.responses import RuleExecutionResult
     from app.daemon.notifier import notify_admin_of_failure
     from app.services.llm.orchestrator import generate_batch_summary
+    from app.services.violations.alert_context import attach_alert_context
 
     expected = rule_dict.get("expected_result", {})
     pseudo_rule = RuleExecutionRequest(
@@ -114,6 +115,7 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
             type=expected.get("type", "zero_violations"),
             value=expected.get("value"),
         ),
+        notification_channels=rule_dict.get("notification_channels") or ["slack", "email"],
     )
     async with db_engine.connect() as conn:
         batch_row = (await conn.execute(
@@ -153,6 +155,11 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
         execution_time_ms=0,
         executed_at=datetime.now(UTC),
         error=None,
+    )
+    await attach_alert_context(
+        pseudo_result,
+        rule_id=rule_dict["rule_id"],
+        batch_id=batch_id,
     )
 
     # --- Acquire dispatching lock (idempotency: allow open or dispatching if it's a retry) ---
@@ -201,12 +208,15 @@ async def _execute_dispatch(task, batch_id: int, rule_dict: dict, cid: str) -> N
             cid, exc
         )
 
-    # --- Notify (raise on failure to trigger Celery retry) ---
+    # --- Notify and preserve failed delivery state for operator visibility. ---
     new_status: str
     try:
-        await notify_admin_of_failure(pseudo_rule, pseudo_result)
-        new_status = "dispatched"
-        task_logger.info("%s [NOTIFY SUCCESS]", cid)
+        outcome = await notify_admin_of_failure(pseudo_rule, pseudo_result)
+        new_status = "dispatched" if outcome.any_sent else "failed"
+        if outcome.any_sent:
+            task_logger.info("%s [NOTIFY SUCCESS]", cid)
+        else:
+            task_logger.error("%s [NOTIFY FAILED] no channels delivered", cid)
     except Exception as exc:
         task_logger.error("%s [NOTIFY FAILED] error=%s", cid, exc)
         new_status = "failed"

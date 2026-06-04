@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 from app.models.requests import RuleExecutionRequest, ExpectedResult
 from app.models.responses import RuleExecutionResult
+from app.models.violations import ViolationBatch
 from app.services.violations import aggregator
 
 
@@ -127,6 +128,9 @@ async def test_duplicate_after_dispatched_batch(monkeypatch, base_rule, base_res
     mock_dispatch = AsyncMock()
     monkeypatch.setattr(aggregator, "_dispatch_batch_immediately", mock_dispatch)
 
+    async def fake_missing_channels(*args, **kwargs): return []
+    monkeypatch.setattr(aggregator, "_missing_requested_channels", fake_missing_channels)
+
     await aggregator.process_violation(base_rule, base_result)
 
     # Verify that we searched for the batch regardless of status
@@ -165,15 +169,46 @@ async def test_critical_severity_duplicate_handling(monkeypatch, base_rule, base
     mock_dispatch = AsyncMock()
     monkeypatch.setattr(aggregator, "_dispatch_batch_immediately", mock_dispatch)
 
+    async def fake_missing_channels(*args, **kwargs): return []
+    monkeypatch.setattr(aggregator, "_missing_requested_channels", fake_missing_channels)
+
     await aggregator.process_violation(base_rule, base_result)
 
     mock_dispatch.assert_not_called()
 
 
 @pytest.mark.asyncio
+async def test_duplicate_dispatches_newly_enabled_channel(monkeypatch, base_rule, base_result) -> None:
+    fake_engine = FakeEngine(severity="medium", batch_id=101)
+    monkeypatch.setattr(aggregator, "db_engine", fake_engine)
+    base_rule.notification_channels = ["slack", "email"]
+
+    async def fake_get_policy(rule_id): return FakePolicy()
+    monkeypatch.setattr(aggregator, "get_or_create_policy", fake_get_policy)
+
+    async def fake_check_duplicate(*args, **kwargs): return True
+    monkeypatch.setattr(aggregator, "check_duplicate_and_increment", fake_check_duplicate)
+
+    async def fake_missing_channels(rule, batch_id):
+        assert batch_id == 101
+        assert rule.notification_channels == ["slack", "email"]
+        return ["email"]
+    monkeypatch.setattr(aggregator, "_missing_requested_channels", fake_missing_channels)
+
+    mock_dispatch = AsyncMock()
+    monkeypatch.setattr(aggregator, "_dispatch_batch_immediately", mock_dispatch)
+
+    await aggregator.process_violation(base_rule, base_result)
+
+    mock_dispatch.assert_awaited_once()
+    dispatched_rule = mock_dispatch.await_args.args[1]
+    assert dispatched_rule.notification_channels == ["email"]
+
+
+@pytest.mark.asyncio
 async def test_duplicate_outside_dedupe_window(monkeypatch, base_rule, base_result) -> None:
     # Scenario: is_duplicate is False (outside dedupe window).
-    # Should insert new event and new batch (assuming no open batch exists), and NOT dispatch unless critical.
+    # Should insert new event, create/update a batch, and dispatch the new failure.
     
     fake_engine = FakeEngine(severity="medium", batch_id=None)  # No open batch
     monkeypatch.setattr(aggregator, "db_engine", fake_engine)
@@ -199,4 +234,19 @@ async def test_duplicate_outside_dedupe_window(monkeypatch, base_rule, base_resu
     insert_batches = next((q for q, _ in fake_engine.queries if "INSERT INTO DQ_RESULTS.VIOLATION_BATCHES" in q), None)
     assert insert_batches is not None
     
-    mock_dispatch.assert_not_called()
+    mock_dispatch.assert_awaited_once()
+
+
+def test_violation_batch_allows_worker_intermediate_statuses() -> None:
+    batch = ViolationBatch(
+        id=1,
+        rule_id=1,
+        severity="medium",
+        first_seen=datetime.now(UTC),
+        last_seen=datetime.now(UTC),
+        total_occurrences=1,
+        total_violation_count=10,
+        status="dispatching",
+    )
+
+    assert batch.status == "dispatching"

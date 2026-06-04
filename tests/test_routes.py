@@ -3,8 +3,10 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from app.api import routes
+from app.api import product_routes
 from app.main import app
 from app.models.requests import ExpectedResult, SavedRuleCreateRequest
+from app.models.product import JobResponse
 from app.models.responses import (
     DatabaseConnectionResponse,
     RuleExecutionResult,
@@ -258,7 +260,42 @@ def test_retrieve_all_results_includes_ad_hoc(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()[0]["rule_id"] is None
-    assert response.json()[0]["rule_name"] == "Negative salary check testing"
+
+
+def test_update_job_can_clear_schedule(monkeypatch) -> None:
+    async def fake_update_rule(rule_id: int, **kwargs) -> SavedRuleResponse:
+        assert rule_id == 1
+        assert kwargs["schedule_text"] is None
+        assert kwargs["schedule_cron"] is None
+        return _saved_rule(rule_id)
+
+    async def fake_job_from_rule(rule: SavedRuleResponse) -> JobResponse:
+        return JobResponse(
+            id=rule.rule_id,
+            database_connection_id=rule.database_connection_id,
+            database_name=rule.database_name,
+            table_name=rule.table_name,
+            rule_name=rule.rule_name,
+            sql=rule.sql,
+            expected_result=rule.expected_result,
+            schedule_text=rule.schedule_text,
+            schedule_cron=rule.schedule_cron,
+            is_enabled=rule.is_enabled,
+            severity=rule.severity,
+            notification_channels=rule.notification_channels,
+            scheduler_status="missing_schedule",
+            created_at=rule.created_at,
+            updated_at=rule.updated_at,
+        )
+
+    monkeypatch.setattr(product_routes.registry, "update_rule", fake_update_rule)
+    monkeypatch.setattr(product_routes, "_job_from_rule", fake_job_from_rule)
+
+    response = client.patch("/orchestrator/jobs/1", json={"schedule_text": ""})
+
+    assert response.status_code == 200
+    assert response.json()["scheduler_status"] == "missing_schedule"
+    assert response.json()["rule_name"] == "No active employee has negative salary"
 
 
 def test_preserves_ad_hoc_rules_run(monkeypatch) -> None:

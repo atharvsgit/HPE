@@ -317,6 +317,10 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.form-actions {
+  margin-top: 18px;
+}
+
 .topbar-title h2 {
   margin: 2px 0 0;
   font-size: 24px;
@@ -509,6 +513,14 @@ button:disabled {
   grid-template-columns: 1fr;
 }
 
+.review-toolbar {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -545,6 +557,34 @@ button:disabled {
 .field textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.checkbox-row {
+  min-height: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-check {
+  min-height: 36px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  background: var(--bg-panel-soft);
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mini-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
 }
 
 .primary-button,
@@ -773,6 +813,25 @@ button:disabled {
   gap: 8px;
 }
 
+.delivery-panel {
+  align-self: start;
+}
+
+.delivery-log {
+  max-height: min(520px, calc(100vh - 250px));
+  min-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  background: var(--bg-panel-soft);
+  padding: 10px;
+  scrollbar-gutter: stable;
+}
+
+.delivery-log .list-row {
+  background: var(--bg-panel);
+}
+
 .sql-box {
   margin: 14px 0;
   border: 1px solid var(--border-main);
@@ -794,6 +853,61 @@ button:disabled {
 .job-card {
   display: grid;
   gap: 14px;
+}
+
+.compact-jobs {
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-jobs .job-card {
+  gap: 10px;
+  padding: 12px;
+}
+
+.compact-jobs .card-title-row {
+  gap: 10px;
+}
+
+.compact-jobs .job-detail-grid,
+.compact-jobs .job-editor-grid {
+  gap: 8px;
+}
+
+.compact-jobs .job-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-jobs .info-card {
+  padding: 10px;
+}
+
+.compact-jobs .info-card span {
+  font-size: 10px;
+}
+
+.compact-jobs .info-card strong {
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+.compact-jobs .sql-box {
+  margin: 4px 0;
+  padding: 9px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.compact-jobs .sql-box.compact {
+  max-height: 86px;
+}
+
+.job-actions {
+  gap: 8px;
+}
+
+.job-actions button {
+  padding-inline: 12px;
 }
 
 .job-detail-grid {
@@ -1061,7 +1175,9 @@ button:disabled {
   .metric-grid,
   .database-grid,
   .schema-browser,
+  .compact-jobs,
   .job-detail-grid,
+  .review-toolbar,
   .settings-grid,
   .settings-form-grid,
   .theme-grid {
@@ -1089,13 +1205,15 @@ button:disabled {
   .metric-grid,
   .form-grid,
   .review-grid,
+  .review-toolbar,
   .database-grid,
   .schema-browser,
-    .job-detail-grid,
-    .job-editor-grid,
-    .settings-grid,
-    .settings-form-grid,
-    .theme-grid {
+  .compact-jobs,
+  .job-detail-grid,
+  .job-editor-grid,
+  .settings-grid,
+  .settings-form-grid,
+  .theme-grid {
     grid-template-columns: 1fr;
   }
 

@@ -37,7 +37,8 @@ class Settings(BaseModel):
     max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "5"))
     pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
-    rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "120"))
+    rule_execution_jitter_seconds: int = int(os.getenv("RULE_EXECUTION_JITTER_SECONDS", "0"))
+    scheduler_timezone: str = os.getenv("SCHEDULER_TIMEZONE", "Asia/Kolkata")
     slack_webhook_url: str | None = os.getenv("SLACK_WEBHOOK_URL")
     slack_bot_token: str | None = os.getenv("SLACK_BOT_TOKEN")
     slack_channel: str | None = os.getenv("SLACK_CHANNEL")
@@ -50,6 +51,7 @@ class Settings(BaseModel):
     notification_http_timeout_seconds: float = float(
         os.getenv("NOTIFICATION_HTTP_TIMEOUT_SECONDS", "5")
     )
+    ai_planner_timeout_seconds: float = float(os.getenv("AI_PLANNER_TIMEOUT_SECONDS", "6"))
     notification_email_from: str = os.getenv(
         "NOTIFICATION_EMAIL_FROM",
         "alerts@dataqualitydaemon.local",

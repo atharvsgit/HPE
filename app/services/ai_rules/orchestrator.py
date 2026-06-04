@@ -1,4 +1,6 @@
 import logging
+import json
+import re
 from sqlalchemy import text
 from app.db.session import metadata_engine
 from app.services.ai_rules.sanitizer import sanitize_prompt
@@ -6,14 +8,9 @@ from app.services.ai_rules.schema_context import get_schema_context
 from app.services.ai_rules.prompts import SYSTEM_PROMPT
 from app.services.ai_rules.parser import parse_llm_response, AIRuleResponse
 from app.services.ai_rules.validator import validate_ai_generated_sql
-from app.services.ai_rules.dry_run import dry_run_sql
+from app.services.llm.providers.groq_provider import GroqProvider
+from app.settings import get_settings
 from typing import Dict, Any
-
-try:
-    from app.services.llm.providers.groq import generate_text
-    HAS_GROQ = True
-except ImportError:
-    HAS_GROQ = False
 
 logger = logging.getLogger(__name__)
 
@@ -45,37 +42,35 @@ async def generate_ai_rule(
         dynamic_examples=existing_rules_str
     )
     
+    settings = get_settings()
     provider_name = "Groq"
-    model_name = "llama3-70b-8192" # Fallback/default if env not set
-    parsing_failure = False
-    
-    if HAS_GROQ:
+    model_name = settings.llm_model
+
+    if settings.groq_api_key:
         try:
-            llm_text = await generate_text(clean_prompt, sys_prompt)
+            llm_payload = await GroqProvider().generate_json(clean_prompt, sys_prompt)
+            llm_text = json.dumps(llm_payload)
         except Exception as e:
             logger.error(f"LLM Generation failed: {e}")
             raise RuntimeError("Failed to generate rule with AI.")
     else:
-        # Dummy response for testing if Groq is not configured
-        llm_text = """
-        {
-          "sql": "SELECT count(*) AS violation_count FROM business_data.customers WHERE email IS NULL;",
-          "explanation": "Dummy explanation.",
-          "assumptions": ["Dummy assumption"],
-          "possible_edge_cases": ["Dummy edge case"],
-          "confidence_reasoning": "Dummy reasoning",
-          "confidence": "low"
-        }
-        """
-        provider_name = "Dummy"
-        model_name = "Dummy"
+        table_ref = _qualified_table(schema_name, table_name)
+        llm_text = json.dumps({
+            "sql": f"SELECT COUNT(*) AS violation_count FROM {table_ref} WHERE FALSE;",
+            "explanation": "No Groq API key is configured, so a safe draft was generated for human editing.",
+            "assumptions": ["A human reviewer will replace the placeholder condition before approval."],
+            "possible_edge_cases": ["The placeholder condition never returns violations."],
+            "confidence_reasoning": "Fallback draft only; it is syntactically safe but not semantically useful.",
+            "confidence": "low",
+        })
+        provider_name = "Fallback"
+        model_name = "local-safe-draft"
         
     # 5. Parse and Validate
     try:
         parsed: AIRuleResponse = parse_llm_response(llm_text)
         validate_ai_generated_sql(parsed.sql)
     except Exception as e:
-        parsing_failure = True
         logger.error(f"Parsing/Validation failed: {e}")
         # Even if it fails validation, we log it for audit
         generation_id = await _log_generation(
@@ -115,12 +110,14 @@ async def _get_existing_rules(schema_name: str, table_name: str) -> str:
             res = await conn.execute(
                 text(
                     """
-                    SELECT description, rule_sql 
+                    SELECT rule_name, sql_text
                     FROM dq_config.dq_rules
-                    WHERE is_active = true 
+                    WHERE is_enabled = true
+                      AND sql_text ILIKE :table_pattern
                     LIMIT 3
                     """
-                )
+                ),
+                {"table_pattern": f"%{schema_name}.{table_name}%"},
             )
             rules = res.mappings().all()
             if not rules:
@@ -128,13 +125,13 @@ async def _get_existing_rules(schema_name: str, table_name: str) -> str:
                 
             formatted = []
             for i, r in enumerate(rules, 1):
-                formatted.append(f"Example {i}:\nUser: {r['description']}\nResponse:\n{{\"sql\": \"{r['rule_sql']}\"}}")
+                formatted.append(
+                    f"Example {i}:\nUser: {r['rule_name']}\nResponse:\n{{\"sql\": \"{r['sql_text']}\"}}"
+                )
             return "\n\n".join(formatted)
     except Exception as e:
         logger.warning(f"Failed to fetch existing rules: {e}")
         return ""
-
-import json
 
 async def _log_generation(
     clean_prompt: str,
@@ -194,7 +191,7 @@ async def get_generation(generation_id: int) -> Dict[str, Any]:
         return dict(row)
 
 async def approve_generation(generation_id: int, sql: str, approver: str = "system") -> Dict[str, Any]:
-    """Approve a rule and save edits."""
+    """Approve a generation, save edits, and create a saved rule."""
     # Validate the final SQL just in case
     validate_ai_generated_sql(sql)
     
@@ -225,10 +222,59 @@ async def approve_generation(generation_id: int, sql: str, approver: str = "syst
                 ),
                 {"id": generation_id, "approver": approver, "sql": sql, "edited": edited}
             )
+
+            rule_id = (await conn.execute(
+                text(
+                    """
+                    INSERT INTO dq_config.dq_rules (
+                        rule_name,
+                        sql_text,
+                        expected_result_type,
+                        expected_result_value,
+                        is_enabled,
+                        schedule_cron,
+                        severity,
+                        notification_channels
+                    )
+                    VALUES (
+                        :rule_name,
+                        :sql_text,
+                        'zero_violations',
+                        NULL,
+                        true,
+                        NULL,
+                        'medium',
+                        CAST(:notification_channels AS jsonb)
+                    )
+                    RETURNING rule_id
+                    """
+                ),
+                {
+                    "rule_name": f"AI approved rule {generation_id}",
+                    "sql_text": sql,
+                    "notification_channels": json.dumps(["slack"]),
+                },
+            )).scalar_one()
             
             # Fetch updated row
             res2 = await conn.execute(
                 text("SELECT * FROM dq_results.ai_rule_generations WHERE id = :id"),
                 {"id": generation_id}
             )
-            return dict(res2.mappings().first())
+            approved_row = dict(res2.mappings().first())
+            approved_row["saved_rule_id"] = rule_id
+            return approved_row
+
+
+def _qualified_table(schema_name: str, table_name: str) -> str:
+    return ".".join(_quote_identifier(part) for part in (_safe_identifier(schema_name), _safe_identifier(table_name)))
+
+
+def _safe_identifier(value: str) -> str:
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", value):
+        raise ValueError("Schema and table names must be simple PostgreSQL identifiers.")
+    return value
+
+
+def _quote_identifier(value: str) -> str:
+    return f'"{value.replace(chr(34), chr(34) * 2)}"'

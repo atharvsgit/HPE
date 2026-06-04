@@ -10,8 +10,9 @@ from app.db.session import metadata_engine as db_engine
 from app.models.requests import RuleExecutionRequest
 from app.models.responses import RuleExecutionResult
 from app.services.violations.deduplicator import check_duplicate_and_increment, generate_fingerprint
-from app.services.violations.llm_hooks import enqueue_batch_dispatch, enrich_batch_with_ai_summary
+from app.services.violations.llm_hooks import enrich_batch_with_ai_summary
 from app.services.violations.policies import get_or_create_policy
+from app.services.violations.alert_context import attach_alert_context
 
 logger = logging.getLogger(__name__)
 
@@ -128,51 +129,94 @@ async def process_violation(rule: RuleExecutionRequest, result: RuleExecutionRes
                 {"rule_id": rule_id, "severity": severity, "violation_count": observed_value}
             )).scalar_one()
 
-    # 5. Critical violations trigger immediately
-    if severity == "critical" and not is_duplicate:
-        await _dispatch_batch_immediately(batch_id, rule, result)
+    # 5. New failures trigger notifications immediately. Duplicate failures are
+    # still aggregated to avoid repeatedly notifying on channels that already
+    # received this incident. If a user enables a new channel while the incident
+    # is still inside the dedupe window, dispatch only that missing channel.
+    dispatch_rule = rule
+    should_dispatch = not is_duplicate
+    if is_duplicate:
+        missing_channels = await _missing_requested_channels(rule, batch_id)
+        if missing_channels:
+            dispatch_rule = rule.model_copy(update={"notification_channels": missing_channels})
+            should_dispatch = True
+
+    if should_dispatch:
+        await attach_alert_context(
+            result,
+            rule_id=rule_id,
+            batch_id=batch_id,
+            deduplication_window_minutes=policy.deduplication_window_minutes,
+        )
+        await _dispatch_batch_immediately(batch_id, dispatch_rule, result)
         
 
 async def _dispatch_batch_immediately(batch_id: int, rule: RuleExecutionRequest, result: RuleExecutionResult) -> None:
     """
-    Handles immediate dispatch for critical-severity violations.
+    Handles immediate dispatch for a newly opened violation batch.
 
-    Preferred path: enqueue a Celery task so LLM enrichment runs async.
-    Fallback: inline enrichment + direct notify if Celery/Redis is unavailable.
-    The batch status is NOT marked dispatched here — the worker owns that transition.
+    The current prototype performs inline enrichment and notification delivery
+    for newly opened batches. The dispatcher module owns the async Celery path
+    for expired batches.
     """
-    # --- Preferred: async Celery dispatch (non-blocking) ---
-    # Integration point: llm_hooks.enqueue_batch_dispatch → Celery → worker.py
-    enqueued = enqueue_batch_dispatch(batch_id, rule)
-    if enqueued:
-        logger.info(
-            "Critical batch %s enqueued for async LLM dispatch.", batch_id
-        )
-        return
-
-    # --- Fallback: Celery unavailable, dispatch synchronously ---
-    logger.warning(
-        "Celery unavailable. Falling back to inline dispatch for critical batch %s.", batch_id
-    )
     ai_enrichment = await enrich_batch_with_ai_summary(batch_id, rule)
     if ai_enrichment:
         result.ai_enrichment = ai_enrichment
 
     try:
-        await notify_admin_of_failure(rule, result)
+        outcome = await notify_admin_of_failure(rule, result)
+        new_status = "dispatched" if outcome.any_sent else "failed"
         async with db_engine.begin() as conn:
             await conn.execute(
-                text("UPDATE dq_results.violation_batches SET status = 'dispatched' WHERE id = :id"),
-                {"id": batch_id},
+                text("UPDATE dq_results.violation_batches SET status = :status WHERE id = :id"),
+                {"status": new_status, "id": batch_id},
             )
-            await conn.execute(
-                text("UPDATE dq_results.violation_events SET status = 'dispatched' WHERE rule_id = :rule_id AND status = 'open'"),
-                {"rule_id": rule.rule_id},
-            )
+            if outcome.any_sent:
+                await conn.execute(
+                    text("UPDATE dq_results.violation_events SET status = 'dispatched' WHERE rule_id = :rule_id AND status = 'open'"),
+                    {"rule_id": rule.rule_id},
+                )
     except Exception as exc:
-        logger.error("Failed to dispatch critical batch %s: %s", batch_id, exc)
+        logger.error("Failed to dispatch violation batch %s: %s", batch_id, exc)
         async with db_engine.begin() as conn:
             await conn.execute(
                 text("UPDATE dq_results.violation_batches SET status = 'failed' WHERE id = :id"),
                 {"id": batch_id},
             )
+
+
+async def _missing_requested_channels(rule: RuleExecutionRequest, batch_id: int) -> list[str]:
+    requested_channels = list(dict.fromkeys(rule.notification_channels or ["slack", "email"]))
+    if not requested_channels:
+        return []
+
+    async with db_engine.connect() as conn:
+        batch_started_at = (await conn.execute(
+            text(
+                """
+                SELECT first_seen
+                FROM dq_results.violation_batches
+                WHERE id = :batch_id
+                """
+            ),
+            {"batch_id": batch_id},
+        )).scalar_one_or_none()
+
+        if batch_started_at is None:
+            return requested_channels
+
+        sent_rows = (await conn.execute(
+            text(
+                """
+                SELECT DISTINCT channel
+                FROM dq_results.notification_deliveries
+                WHERE rule_id = :rule_id
+                  AND status = 'sent'
+                  AND sent_at >= :batch_started_at
+                """
+            ),
+            {"rule_id": rule.rule_id, "batch_started_at": batch_started_at},
+        )).mappings().all()
+
+    sent_channels = {row["channel"] for row in sent_rows}
+    return [channel for channel in requested_channels if channel not in sent_channels]

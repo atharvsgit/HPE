@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from app.models.requests import ExpectedResult
 
@@ -24,7 +24,22 @@ class AIEnrichment(BaseModel):
     parsing_failure: bool = False
 
 
+class AlertContext(BaseModel):
+    batch_id: int | None = None
+    deduplication_window_minutes: int | None = None
+    recent_failure_count: int | None = None
+    recent_observed_total: int | float | None = None
+    window_started_at: datetime | None = None
+    window_ended_at: datetime | None = None
+    batch_occurrences: int | None = None
+    batch_violation_count: int | float | None = None
+    batch_first_seen: datetime | None = None
+    batch_last_seen: datetime | None = None
+
+
 class RuleExecutionResult(BaseModel):
+    _alert_context: AlertContext | None = PrivateAttr(default=None)
+
     rule_id: int | None = None
     database_connection_id: int | None = None
     rule_name: str
