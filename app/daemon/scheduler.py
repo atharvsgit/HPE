@@ -22,12 +22,20 @@ async def execute_scheduled_rule(
     jitter_seconds: int | None = None,
 ) -> RuleExecutionResult:
     settings = get_settings()
-    jitter = settings.rule_execution_jitter_seconds if jitter_seconds is None else jitter_seconds
+    is_critical = getattr(rule, "severity", None) == "critical"
 
-    if jitter > 0:
-        delay = random.uniform(0, jitter)
-        logger.info("Delaying scheduled rule %s for %.2f seconds", rule.rule_id, delay)
-        await asyncio.sleep(delay)
+    if is_critical:
+        logger.info(
+            "Skipping jitter for critical rule %s (%s): executing at scheduled time",
+            rule.rule_id,
+            rule.rule_name,
+        )
+    else:
+        jitter = settings.rule_execution_jitter_seconds if jitter_seconds is None else jitter_seconds
+        if jitter > 0:
+            delay = random.uniform(0, jitter)
+            logger.info("Delaying scheduled rule %s for %.2f seconds", rule.rule_id, delay)
+            await asyncio.sleep(delay)
 
     logger.info("Executing scheduled rule %s: %s", rule.rule_id, rule.rule_name)
     result = await executor.execute_rule(registry.execution_request_from_saved_rule(rule))

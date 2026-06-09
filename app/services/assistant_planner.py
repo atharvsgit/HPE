@@ -52,6 +52,8 @@ async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanR
     if raw_plan is None:
         raw_plan = _plan_with_heuristics(request.prompt, schema.model_dump(), database_row)
         source = "heuristic"
+    else:
+        raw_plan = _apply_prompt_overrides(raw_plan, request.prompt, schema.model_dump())
 
     raw_schedule_cron = raw_plan.get("schedule_cron")
     schedule_cron = str(raw_schedule_cron).strip() if raw_schedule_cron is not None else None
@@ -201,9 +203,11 @@ Rules:
 - Generate a SELECT-only SQL query returning one numeric column aliased as violation_count.
 - The SQL must count rows that violate the user's requested condition.
 - For completeness checks such as "has a column/value" or "column is present", count rows where the column IS NULL.
+- Respect explicitly named table and column phrases from the user command. Treat spaces/plurals as matching underscores, e.g. "grade levels" means "grade_level" when that column exists.
 - For future-date checks, count rows where the date/timestamp column is greater than CURRENT_DATE.
 - Normalize the requested schedule into a 5-field cron expression when possible.
 - Use severity critical when the user asks for alerts or reports.
+- Include "email" in notification_channels when the user asks for email, mail, or e-mail. Include "slack" when the user asks for Slack.
 - Return JSON only, no markdown.
 
 JSON shape:
@@ -215,7 +219,7 @@ JSON shape:
   "schedule_text": "original/normalized schedule",
   "schedule_cron": "* * * * * or null",
   "severity": "critical|high|medium|low",
-  "notification_channels": ["slack"],
+  "notification_channels": ["slack", "email"],
   "explanation": "short explanation",
   "confidence": "high|medium|low"
 }}
@@ -242,6 +246,7 @@ def _plan_with_heuristics(
     schedule_text = _schedule_text_from_prompt(text_prompt)
     schedule_cron = parse_schedule_to_cron(schedule_text)
     severity = "critical" if "alert" in text_prompt or "slack" in text_prompt or "report" in text_prompt else "medium"
+    notification_channels = _notification_channels_from_prompt(text_prompt) or ["slack"]
 
     if operator == "not_null":
         where_clause = f"{_quote(column['name'])} IS NULL"
@@ -280,10 +285,62 @@ def _plan_with_heuristics(
         "schedule_text": schedule_text,
         "schedule_cron": schedule_cron,
         "severity": severity,
-        "notification_channels": ["slack"] if "slack" in text_prompt or "alert" in text_prompt else ["slack"],
+        "notification_channels": notification_channels,
         "explanation": f"Counts rows in {table_name} where {column['name']} violates the requested condition.",
         "confidence": "medium",
     }
+
+
+def _apply_prompt_overrides(
+    raw_plan: dict[str, Any],
+    prompt: str,
+    schema_payload: dict[str, Any],
+) -> dict[str, Any]:
+    text_prompt = _normalize_prompt(prompt.lower())
+    normalized_plan = dict(raw_plan)
+
+    channels = _notification_channels_from_prompt(text_prompt)
+    if channels:
+        normalized_plan["notification_channels"] = channels
+        if "alert" in text_prompt or "slack" in channels or "email" in channels:
+            normalized_plan["severity"] = "critical"
+
+    schedule_text = _schedule_text_from_prompt(text_prompt)
+    if schedule_text != "manual":
+        normalized_plan["schedule_text"] = schedule_text
+        normalized_plan["schedule_cron"] = parse_schedule_to_cron(schedule_text)
+
+    tables = schema_payload.get("tables", [])
+    if not tables:
+        return normalized_plan
+
+    table = _choose_table(text_prompt, tables)
+    column, score = _choose_column_with_score(text_prompt, table)
+    if score < 50:
+        return normalized_plan
+
+    operator, value = _condition_from_prompt(text_prompt, column)
+    if operator != "not_null":
+        return normalized_plan
+
+    table_name = table["qualified_name"]
+    normalized_plan.update(
+        {
+            "table_name": table_name,
+            "rule_name": f"{column['name']} not null check",
+            "sql": (
+                f"SELECT COUNT(*) AS violation_count "
+                f"FROM {_quote_qualified(table_name)} "
+                f"WHERE {_quote(column['name'])} IS NULL"
+            ),
+            "expected_result": {"type": "zero_violations"},
+            "explanation": (
+                f"Counts rows in {table_name} where {column['name']} is missing, "
+                "because the user explicitly requested a not-null check."
+            ),
+        }
+    )
+    return normalized_plan
 
 
 def _choose_table(text_prompt: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
@@ -299,13 +356,69 @@ def _choose_table(text_prompt: str, tables: list[dict[str, Any]]) -> dict[str, A
 
 
 def _choose_column(text_prompt: str, table: dict[str, Any]) -> dict[str, Any]:
-    for column in table.get("columns", []):
-        if column["name"].lower() in text_prompt:
-            return column
-    for column in table.get("columns", []):
-        if any(word in column["name"].lower() for word in text_prompt.split()):
-            return column
-    return table.get("columns", [])[0]
+    column, _score = _choose_column_with_score(text_prompt, table)
+    return column
+
+
+def _choose_column_with_score(text_prompt: str, table: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    columns = table.get("columns", [])
+    if not columns:
+        raise ValueError(f"No columns found for table {table.get('qualified_name') or table.get('table_name')}.")
+
+    best_column = columns[0]
+    best_score = 0
+    match_text = _match_text(text_prompt)
+    prompt_tokens = set(match_text.split())
+
+    for column in columns:
+        score = _column_match_score(match_text, prompt_tokens, str(column["name"]))
+        if score > best_score:
+            best_column = column
+            best_score = score
+    return best_column, best_score
+
+
+def _column_match_score(match_text: str, prompt_tokens: set[str], column_name: str) -> int:
+    variants = _column_variants(column_name)
+    if any(f" {variant} " in f" {match_text} " for variant in variants):
+        return 100
+
+    column_tokens = [token for token in _match_text(column_name.replace("_", " ")).split() if len(token) >= 3]
+    if column_tokens and all(token in prompt_tokens or f"{token}s" in prompt_tokens for token in column_tokens):
+        return 80
+    if any(token in prompt_tokens or f"{token}s" in prompt_tokens for token in column_tokens):
+        return 40
+    return 0
+
+
+def _column_variants(column_name: str) -> set[str]:
+    base = _match_text(column_name)
+    spaced = _match_text(column_name.replace("_", " "))
+    variants = {base, spaced}
+    if not spaced.endswith("s"):
+        variants.add(f"{spaced}s")
+    if spaced.endswith("y"):
+        variants.add(f"{spaced[:-1]}ies")
+    return variants
+
+
+def _match_text(value: str) -> str:
+    value = value.lower().replace("'s", " ")
+    value = re.sub(r"[^a-z0-9_]+", " ", value)
+    value = value.replace("_", " ")
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _notification_channels_from_prompt(text_prompt: str) -> list[str]:
+    match_text = _match_text(text_prompt)
+    channels: list[str] = []
+    if "slack" in match_text or "alert on slack" in text_prompt:
+        channels.append("slack")
+    if re.search(r"\b(?:email|e mail|mail|smtp)\b", match_text):
+        channels.append("email")
+    if not channels and "alert" in match_text:
+        channels.append("slack")
+    return list(dict.fromkeys(channels))
 
 
 def _condition_from_prompt(

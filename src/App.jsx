@@ -776,40 +776,77 @@ function Jobs({ jobs, busy, onRun, onPause, onResume, onDelete, onUpdate }) {
 function Alerts({ alerts, notifications }) {
   return (
     <div className="workspace-grid">
-      <section className="panel-card span-7">
-        <PanelHeader title="Failure Alerts" subtitle="Violation batches and event records created by failing rules." />
-        <div className="stack-list">
-          {alerts.slice(0, 30).map((alert) => (
-            <CompactRow
-              key={alert.id}
-              title={alert.rule_name || `Rule ${alert.rule_id}`}
-              meta={`${alert.violation_count || 0} violations at ${formatDate(alert.created_at || alert.first_seen)}`}
-              status={alert.status || alert.severity}
-              tone={alert.status === 'dispatched' ? 'good' : 'bad'}
-            />
-          ))}
-          {!alerts.length && <EmptyState title="No alerts" message="Failures appear here after rule execution." />}
-        </div>
-      </section>
+      <section className="panel-card span-all">
+        <PanelHeader
+          title="Failure Alerts & Delivery Status"
+          subtitle="Each failure shows the Slack and Email notification outcome individually — green means sent, red means failed."
+        />
+        <div className="alert-feed">
+          {alerts.slice(0, 30).map((alert) => {
+            const notifs = alert.notifications || [];
+            // Pick the most recent record per channel (array is already DESC by sent_at from backend)
+            const lastSlack = notifs.find((n) => n.channel === 'slack') || null;
+            const lastEmail = notifs.find((n) => n.channel === 'email') || null;
 
-      <section className="panel-card span-5 delivery-panel">
-        <PanelHeader title="Notification Delivery" subtitle="Slack and email send results recorded by the backend." />
-        <div className="stack-list delivery-log">
-          {notifications.slice(0, 30).map((notification) => (
-            <CompactRow
-              key={notification.id}
-              title={`${titleCase(notification.channel)} delivery`}
-              meta={notification.error_message || formatDate(notification.sent_at)}
-              status={notification.status}
-              tone={notification.status === 'sent' ? 'good' : notification.status === 'failed' ? 'bad' : 'neutral'}
-            />
-          ))}
-          {!notifications.length && <EmptyState title="No delivery logs" message="Slack and email delivery attempts will appear here." />}
+            return (
+              <article className="alert-card" key={alert.id}>
+                <div className="alert-card-header">
+                  <div className="alert-card-title">
+                    <span className={`severity-badge severity-${alert.severity || 'medium'}`}>
+                      {(alert.severity || 'medium').toUpperCase()}
+                    </span>
+                    <strong>{alert.rule_name || `Rule #${alert.rule_id}`}</strong>
+                    {alert.table_name && <span className="alert-table-tag">{alert.table_name}</span>}
+                  </div>
+                  <StatusChip
+                    label={alert.status || 'open'}
+                    tone={alert.status === 'dispatched' ? 'good' : alert.status === 'open' ? 'neutral' : 'bad'}
+                  />
+                </div>
+
+                <div className="alert-card-meta">
+                  <span>
+                    <strong>{alert.violation_count ?? 0}</strong> violations detected
+                  </span>
+                  <span className="alert-time">{formatDate(alert.created_at)}</span>
+                </div>
+
+                <div className="delivery-chips">
+                  <span className="delivery-label">Notifications:</span>
+                  <DeliveryChip channel="Slack" record={lastSlack} />
+                  <DeliveryChip channel="Email" record={lastEmail} />
+                </div>
+              </article>
+            );
+          })}
+          {!alerts.length && <EmptyState title="No alerts yet" message="Failures will appear here after rule execution with their notification delivery status." />}
         </div>
       </section>
     </div>
   );
 }
+
+function DeliveryChip({ channel, record }) {
+  if (!record) {
+    return (
+      <span className="delivery-chip delivery-none" title="No delivery record for this channel">
+        <span className="delivery-dot dot-grey" />
+        {channel}: not attempted
+      </span>
+    );
+  }
+  const sent = record.status === 'sent';
+  return (
+    <span
+      className={`delivery-chip delivery-${sent ? 'sent' : 'failed'}`}
+      title={record.error_message || record.sent_at || ''}
+    >
+      <span className={`delivery-dot dot-${sent ? 'green' : 'red'}`} />
+      {channel}: {sent ? 'sent' : record.status}
+    </span>
+  );
+}
+
 
 function Settings({ theme, setTheme, databases, sentCount, failedCount, appSettings, busy, onSaveAI, onSaveNotifications }) {
   const ai = appSettings?.ai;

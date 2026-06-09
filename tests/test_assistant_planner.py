@@ -1,4 +1,5 @@
 from app.services.assistant_planner import (
+    _apply_prompt_overrides,
     _condition_from_prompt,
     _friendly_dry_run_error,
     _plan_with_heuristics,
@@ -140,6 +141,79 @@ def test_heuristic_plan_handles_informal_salary_words():
         'WHERE "salary" < 10000'
     )
     assert plan["schedule_cron"] == "*/5 * * * *"
+
+
+def test_heuristic_plan_maps_grade_levels_and_mail_request():
+    schema_payload = {
+        "tables": [
+            {
+                "qualified_name": "business_data.students",
+                "table_name": "students",
+                "columns": [
+                    {"name": "student_id", "data_type": "integer", "nullable": False},
+                    {"name": "full_name", "data_type": "text", "nullable": False},
+                    {"name": "grade_level", "data_type": "text", "nullable": True},
+                ],
+            }
+        ]
+    }
+
+    plan = _plan_with_heuristics(
+        "check in every 3 minutes that the student's grade levels are not null and send me a mail and alert on slack",
+        schema_payload,
+        {"name": "Docker Demo Postgres"},
+    )
+
+    assert plan["sql"] == (
+        'SELECT COUNT(*) AS violation_count FROM "business_data"."students" '
+        'WHERE "grade_level" IS NULL'
+    )
+    assert plan["schedule_text"] == "every 3 minutes"
+    assert plan["schedule_cron"] == "*/3 * * * *"
+    assert plan["notification_channels"] == ["slack", "email"]
+    assert plan["severity"] == "critical"
+
+
+def test_provider_plan_is_corrected_when_prompt_names_grade_level_and_email():
+    schema_payload = {
+        "tables": [
+            {
+                "qualified_name": "business_data.students",
+                "table_name": "students",
+                "columns": [
+                    {"name": "student_id", "data_type": "integer", "nullable": False},
+                    {"name": "full_name", "data_type": "text", "nullable": False},
+                    {"name": "grade_level", "data_type": "text", "nullable": True},
+                ],
+            }
+        ]
+    }
+    raw_plan = {
+        "table_name": "business_data.students",
+        "rule_name": "student name not null check",
+        "sql": 'SELECT COUNT(*) AS violation_count FROM "business_data"."students" WHERE "full_name" IS NULL',
+        "expected_result": {"type": "zero_violations"},
+        "schedule_text": "every 3 minutes",
+        "schedule_cron": "*/3 * * * *",
+        "severity": "medium",
+        "notification_channels": ["slack"],
+        "explanation": "Wrongly checks full_name.",
+        "confidence": "medium",
+    }
+
+    plan = _apply_prompt_overrides(
+        raw_plan,
+        "check in every 3 minutes that the student's grade levels are not null and send me a mail and alert on slack",
+        schema_payload,
+    )
+
+    assert plan["sql"] == (
+        'SELECT COUNT(*) AS violation_count FROM "business_data"."students" '
+        'WHERE "grade_level" IS NULL'
+    )
+    assert plan["rule_name"] == "grade_level not null check"
+    assert plan["notification_channels"] == ["slack", "email"]
+    assert plan["severity"] == "critical"
 
 
 def test_positive_greater_than_requirement_counts_lower_values_as_violations():

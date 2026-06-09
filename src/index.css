@@ -1222,6 +1222,12 @@ button:disabled {
   }
 
   .card-title-row,
+
+  .hero-card h3 {
+    font-size: 25px;
+  }
+
+  .card-title-row,
   .list-row {
     align-items: stretch;
     flex-direction: column;
@@ -1230,4 +1236,202 @@ button:disabled {
   .row-meta {
     justify-items: start;
   }
+}
+
+/* -----------------------------------------------------------------------
+   Alert Feed — merged violation + delivery UI
+   ----------------------------------------------------------------------- */
+
+.alert-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.alert-card {
+  border: 1px solid var(--border-main);
+  border-radius: 10px;
+  background: var(--bg-panel-soft);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.alert-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.alert-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.alert-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.alert-card-title strong {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.alert-table-tag {
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+}
+
+.alert-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.alert-card-meta strong {
+  color: var(--text-primary);
+  font-weight: 800;
+}
+
+.alert-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Severity badges */
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.severity-critical {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.severity-high {
+  background: #fff4ec;
+  color: #c2410c;
+}
+
+:root[data-theme='dark'] .severity-high {
+  background: #3b1a08;
+  color: #fb923c;
+}
+
+.severity-medium {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.severity-low {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+/* Delivery chips row */
+.delivery-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.delivery-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  flex-shrink: 0;
+}
+
+.delivery-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.delivery-sent {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.delivery-failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.delivery-none {
+  background: var(--bg-panel);
+  border-color: var(--border-main);
+  color: var(--text-muted);
+}
+
+/* Colored status dots */
+.delivery-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dot-green {
+  background: var(--success);
+}
+
+.dot-red {
+  background: var(--danger);
+}
+
+.dot-grey {
+  background: var(--text-muted);
+}
+
+/* Orphan divider */
+.orphan-divider {
+  margin: 16px 0 10px;
+  border-top: 1px dashed var(--border-main);
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.orphan-divider span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
 }

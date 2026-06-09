@@ -222,7 +222,41 @@ async def list_alerts(limit: int = Query(default=50, ge=1, le=200)) -> list[dict
             """),
             {"limit": limit},
         )).mappings().all()
-    return [dict(row) for row in rows]
+
+        # Collect unique rule_ids to fetch related notification deliveries.
+        # Use a formatted IN clause — asyncpg does not support binding Python
+        # lists via ANY(:param), so we build the list directly from validated
+        # integer IDs (safe: these come from the database, not user input).
+        rule_ids = list({int(row["rule_id"]) for row in rows if row["rule_id"] is not None})
+        notifications_by_rule: dict = {}
+        if rule_ids:
+            id_list = ", ".join(str(rid) for rid in rule_ids)
+            notif_rows = (await conn.execute(
+                text(f"""
+                    SELECT id, rule_id, channel, status, error_message, sent_at
+                    FROM dq_results.notification_deliveries
+                    WHERE rule_id IN ({id_list})
+                    ORDER BY sent_at DESC
+                """),
+            )).mappings().all()
+            for notif in notif_rows:
+                rid = notif["rule_id"]
+                notifications_by_rule.setdefault(rid, []).append({
+                    "id": notif["id"],
+                    "channel": notif["channel"],
+                    "status": notif["status"],
+                    "error_message": notif["error_message"],
+                    "sent_at": notif["sent_at"].isoformat() if notif["sent_at"] else None,
+                })
+
+    result = []
+    for row in rows:
+        alert = dict(row)
+        if alert.get("created_at"):
+            alert["created_at"] = alert["created_at"].isoformat()
+        alert["notifications"] = notifications_by_rule.get(alert["rule_id"], [])
+        result.append(alert)
+    return result
 
 
 @product_router.get("/notifications", response_model=list[NotificationDeliveryResponse])

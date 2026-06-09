@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS dq_config.notification_policies (
     rule_id BIGINT REFERENCES dq_config.dq_rules(rule_id) ON DELETE CASCADE,
     immediate_threshold NUMERIC,
     batch_window_minutes INTEGER DEFAULT 60,
-    deduplication_window_minutes INTEGER DEFAULT 15,
+    deduplication_window_minutes INTEGER DEFAULT 5,
     enable_llm_summary BOOLEAN DEFAULT false,
     enable_fix_suggestions BOOLEAN DEFAULT false,
     slack_enabled BOOLEAN DEFAULT true,
