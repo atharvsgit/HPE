@@ -40,7 +40,26 @@ PROMPT_INJECTION_PHRASES = {
 
 async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanResponse:
     _reject_prompt_injection(request.prompt)
-    database_id = request.database_id or await _default_database_id()
+    
+    # Try to identify database/connection from the prompt
+    connections = await list_database_connections()
+    detected_db_id = None
+    
+    def _normalize_name(val: str) -> str:
+        return re.sub(r"\s+", " ", val.lower().replace("_", " ").replace("-", " ")).strip()
+        
+    prompt_norm = _normalize_name(request.prompt)
+    sorted_connections = sorted(connections, key=lambda c: len(c.name), reverse=True)
+    for conn in sorted_connections:
+        conn_name_norm = _normalize_name(conn.name)
+        conn_db_norm = _normalize_name(conn.database)
+        name_pattern = rf"\b{re.escape(conn_name_norm)}\b"
+        db_pattern = rf"\b{re.escape(conn_db_norm)}\b"
+        if re.search(name_pattern, prompt_norm) or re.search(db_pattern, prompt_norm):
+            detected_db_id = conn.id
+            break
+
+    database_id = detected_db_id or request.database_id or await _default_database_id()
     database_row = await get_connection_row(database_id)
     if database_row is None:
         raise ValueError("No database connection found. Add a database first.")
@@ -462,9 +481,10 @@ def _condition_from_prompt(
         return ("<=" if positive_requirement else ">"), number
     if any(term in text_prompt for term in ["equals", "equal to", "is "]):
         value = _equality_value(text_prompt)
-        if positive_requirement and value not in {None, ""}:
-            return "not_equals", value
-        return "=", value if value is not None else ""
+        if value not in {None, ""}:
+            if positive_requirement:
+                return "not_equals", value
+            return "=", value
     column_names = {
         str(column["name"]).lower(),
         str(column["name"]).lower().replace("_", " "),
@@ -578,7 +598,10 @@ def _equality_value(text_prompt: str) -> int | str | None:
         match = re.search(pattern, text_prompt)
         if match:
             value = match.group(1)
-            if value not in {"not", "never", "null", "missing", "present", "populated"}:
+            if value not in {
+                "not", "never", "null", "missing", "present", "populated",
+                "a", "an", "the", "addition", "additions", "new", "any", "some"
+            }:
                 return value
     return _number_after_terms(text_prompt, ["equals", "equal to", "is"]) or _first_number(text_prompt)
 
@@ -586,7 +609,7 @@ def _equality_value(text_prompt: str) -> int | str | None:
 def _schedule_text_from_prompt(text_prompt: str) -> str:
     match = re.search(
         r"\bevery\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
-        r"(?:minute|minutes|hour|hours|day|days|week|weeks|month|months)"
+        r"(?:minutes|minute|hours|hour|days|day|weeks|week|months|month)\b"
         r"(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?",
         text_prompt,
     )

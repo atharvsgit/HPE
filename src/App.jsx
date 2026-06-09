@@ -193,14 +193,16 @@ export default function App() {
       setSchema(result);
     });
 
-  const generatePlan = () =>
-    runAction('Plan generated. Review before approving.', () =>
+  const generatePlan = () => {
+    setPlan(null);
+    return runAction('Plan generated. Review before approving.', () =>
       planCommand({
         prompt: command,
         database_id: selectedDatabase ? Number(selectedDatabase.id) : null,
       }), (result) => {
       setPlan(result);
     });
+  };
 
   const savePlan = () =>
     runAction('Validation job saved. Scheduler will pick it up within one minute.', () => approvePlan(plan), async () => {
@@ -255,7 +257,10 @@ export default function App() {
     command: (
       <AICommand
         command={command}
-        setCommand={setCommand}
+        setCommand={(val) => {
+          setCommand(val);
+          setPlan(null);
+        }}
         databases={databases}
         selectedDatabaseId={selectedDatabaseId}
         setSelectedDatabaseId={setSelectedDatabaseId}
@@ -263,6 +268,7 @@ export default function App() {
         busy={busy}
         onPlan={generatePlan}
         onApprove={savePlan}
+        onReject={() => setPlan(null)}
         onVoice={startVoice}
       />
     ),
@@ -529,33 +535,36 @@ function Databases({ databases, form, setForm, schema, busy, onAdd, onTest, onSc
         </div>
       </section>
 
-      {schema && (
-        <section className="panel-card span-all">
-          <PanelHeader title="Schema Browser" subtitle={`${schema.tables.length} tables visible to this connection.`} />
-          <div className="schema-browser">
-            {schema.tables.map((table) => (
-              <article key={table.qualified_name} className="schema-card">
-                <div className="card-title-row">
-                  <div>
-                    <h3>{table.qualified_name}</h3>
-                    <p>{table.columns.length} columns</p>
+      {schema && (() => {
+        const visibleTables = schema.tables.filter((table) => !table.schema_name.startsWith('dq_'));
+        return (
+          <section className="panel-card span-all">
+            <PanelHeader title="Schema Browser" subtitle={`${visibleTables.length} tables visible to this connection.`} />
+            <div className="schema-browser">
+              {visibleTables.map((table) => (
+                <article key={table.qualified_name} className="schema-card">
+                  <div className="card-title-row">
+                    <div>
+                      <h3>{table.qualified_name}</h3>
+                      <p>{table.columns.length} columns</p>
+                    </div>
                   </div>
-                </div>
-                <div className="chip-row">
-                  {table.columns.slice(0, 10).map((column) => (
-                    <span className="chip" key={column.name}>{column.name} <small>{column.data_type}</small></span>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
+                  <div className="chip-row">
+                    {table.columns.slice(0, 10).map((column) => (
+                      <span className="chip" key={column.name}>{column.name} <small>{column.data_type}</small></span>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 }
 
-function AICommand({ command, setCommand, databases, selectedDatabaseId, setSelectedDatabaseId, plan, busy, onPlan, onApprove, onVoice }) {
+function AICommand({ command, setCommand, databases, selectedDatabaseId, setSelectedDatabaseId, plan, busy, onPlan, onApprove, onReject, onVoice }) {
   const [previewTimezone, setPreviewTimezone] = useState('Asia/Kolkata');
   const previewTimezones = plan?.schedule_preview?.timezones || [];
   const selectedTimezonePreview =
@@ -655,6 +664,9 @@ function AICommand({ command, setCommand, databases, selectedDatabaseId, setSele
           <div className="button-row">
             <button className="primary-button" type="button" disabled={busy} onClick={onApprove}>
               Approve And Schedule
+            </button>
+            <button className="danger-button" type="button" disabled={busy} onClick={onReject}>
+              Reject
             </button>
           </div>
         </section>

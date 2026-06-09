@@ -166,7 +166,7 @@ async def get_database_schema(connection_id: int) -> DatabaseSchemaResponse:
             table_rows = (await conn.execute(text("""
                 SELECT table_schema, table_name
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'dq_results')
                   AND table_type = 'BASE TABLE'
                 ORDER BY table_schema, table_name
             """))).mappings().all()
@@ -174,7 +174,7 @@ async def get_database_schema(connection_id: int) -> DatabaseSchemaResponse:
             column_rows = (await conn.execute(text("""
                 SELECT table_schema, table_name, column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'dq_results')
                 ORDER BY table_schema, table_name, ordinal_position
             """))).mappings().all()
 
