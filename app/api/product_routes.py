@@ -28,6 +28,7 @@ from app.models.requests import SavedRuleCreateRequest
 from app.models.responses import RuleExecutionResult, SavedRuleResponse
 from app.services.assistant_planner import create_assistant_plan
 from app.services.database_connections import (
+    DuplicateDatabaseConnectionError,
     create_database_connection,
     delete_database_connection,
     get_database_schema,
@@ -46,7 +47,17 @@ product_router = APIRouter(tags=["Product Workspace"])
 
 @product_router.post("/databases", response_model=DatabaseConnectionResponse, status_code=status.HTTP_201_CREATED)
 async def create_database(request: DatabaseConnectionCreate) -> DatabaseConnectionResponse:
-    return await create_database_connection(request)
+    try:
+        return await create_database_connection(request)
+    except DuplicateDatabaseConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "DUPLICATE_DATABASE_CONNECTION",
+                "message": str(exc),
+                "existing_connection_id": exc.existing_connection_id,
+            },
+        ) from exc
 
 
 @product_router.get("/databases", response_model=list[DatabaseConnectionResponse])
@@ -144,6 +155,15 @@ async def create_job(request: JobCreateRequest) -> JobResponse:
                 table_name=request.table_name,
             )
         )
+    except registry.DuplicateRuleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "DUPLICATE_RULE",
+                "message": str(exc),
+                "existing_rule_id": exc.existing_rule_id,
+            },
+        ) from exc
     except (CronValidationError, ScheduleParseError, SQLSafetyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await _job_from_rule(rule)

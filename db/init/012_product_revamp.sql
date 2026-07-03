@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS dq_config.database_connections (
     database_name TEXT NOT NULL,
     username TEXT NOT NULL,
     password_secret TEXT NOT NULL,
+    connection_fingerprint TEXT NULL,
     status TEXT NOT NULL DEFAULT 'untested',
     last_tested_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -18,12 +19,24 @@ CREATE TABLE IF NOT EXISTS dq_config.database_connections (
     CONSTRAINT database_connections_status_check CHECK (status IN ('untested', 'connected', 'failed'))
 );
 
+ALTER TABLE dq_config.database_connections
+ADD COLUMN IF NOT EXISTS connection_fingerprint TEXT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_database_connections_fingerprint
+ON dq_config.database_connections (connection_fingerprint)
+WHERE connection_fingerprint IS NOT NULL;
+
 ALTER TABLE dq_config.dq_rules
 ADD COLUMN IF NOT EXISTS database_connection_id BIGINT NULL REFERENCES dq_config.database_connections(id) ON DELETE SET NULL,
 ADD COLUMN IF NOT EXISTS table_name TEXT NULL,
 ADD COLUMN IF NOT EXISTS schedule_text TEXT NULL,
 ADD COLUMN IF NOT EXISTS notification_channels JSONB NOT NULL DEFAULT '["slack"]'::jsonb,
-ADD COLUMN IF NOT EXISTS source_prompt TEXT NULL;
+ADD COLUMN IF NOT EXISTS source_prompt TEXT NULL,
+ADD COLUMN IF NOT EXISTS rule_fingerprint TEXT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dq_rules_rule_fingerprint
+ON dq_config.dq_rules (rule_fingerprint)
+WHERE rule_fingerprint IS NOT NULL;
 
 ALTER TABLE dq_results.test_results
 ADD COLUMN IF NOT EXISTS database_connection_id BIGINT NULL REFERENCES dq_config.database_connections(id) ON DELETE SET NULL;

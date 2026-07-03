@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.daemon import executor, registry
 from app.daemon.cron import classify_scheduler_status, cron_to_trigger
+from app.daemon.rule_identity import build_rule_fingerprint
 from app.db.session import close_db_engine
 from app.models.responses import RuleExecutionResult, SavedRuleResponse
 from app.services.schema_bootstrap import ensure_product_schema
@@ -54,6 +55,7 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
     rules = await registry.list_rules()
     scheduled_count = 0
     active_job_ids: set[str] = set()
+    active_rule_fingerprints: dict[str, int] = {}
 
     for rule in rules:
         scheduler_status = classify_scheduler_status(rule.is_enabled, rule.schedule_cron)
@@ -65,6 +67,23 @@ async def load_scheduled_rules(scheduler: AsyncIOScheduler) -> int:
                 scheduler_status,
             )
             continue
+
+        rule_fingerprint = build_rule_fingerprint(
+            database_connection_id=rule.database_connection_id,
+            sql=rule.sql,
+            expected_result_type=rule.expected_result.type,
+            expected_result_value=rule.expected_result.value,
+        )
+        existing_rule_id = active_rule_fingerprints.get(rule_fingerprint)
+        if existing_rule_id is not None:
+            logger.warning(
+                "Skipping duplicate scheduled rule %s (%s); equivalent rule %s is already scheduled",
+                rule.rule_id,
+                rule.rule_name,
+                existing_rule_id,
+            )
+            continue
+        active_rule_fingerprints[rule_fingerprint] = rule.rule_id
 
         job_id = f"dq_rule_{rule.rule_id}"
         active_job_ids.add(job_id)

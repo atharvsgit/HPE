@@ -5,6 +5,14 @@ const api = axios.create({
   timeout: 15000,
 });
 
+function errorMessage(error) {
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail?.message) return detail.message;
+  if (error.response?.data?.message) return error.response.data.message;
+  return error.message || 'Unexpected API error.';
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -12,11 +20,7 @@ api.interceptors.response.use(
       ...error,
       status: error.response?.status,
       data: error.response?.data,
-      message:
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        error.message ||
-        'Unexpected API error.',
+      message: errorMessage(error),
     };
 
     return Promise.reject(normalizedError);

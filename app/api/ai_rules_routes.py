@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import logging
 
+from app.daemon.registry import DuplicateRuleError
 from app.services.ai_rules.orchestrator import generate_ai_rule, get_generation, approve_generation
 from app.services.ai_rules.dry_run import dry_run_sql
 from app.services.ai_rules.validator import SQLSafetyError, validate_ai_generated_sql
@@ -65,6 +66,15 @@ async def save_rule(req: SaveRequest):
         return {"status": "success", "data": result}
     except SQLSafetyError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except DuplicateRuleError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "type": "DUPLICATE_RULE",
+                "message": str(e),
+                "existing_rule_id": e.existing_rule_id,
+            },
+        )
     except Exception as e:
         logger.error(f"Save error: {e}")
         raise HTTPException(status_code=400, detail=str(e))

@@ -39,6 +39,15 @@ async def run_rule(rule: RuleExecutionRequest) -> RuleExecutionResult:
 async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
     try:
         return await registry.create_rule(rule)
+    except registry.DuplicateRuleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "DUPLICATE_RULE",
+                "message": str(exc),
+                "existing_rule_id": exc.existing_rule_id,
+            },
+        ) from exc
     except (CronValidationError, SQLSafetyError) as exc:
         error_type = "INVALID_CRON" if isinstance(exc, CronValidationError) else exc.code
         raise HTTPException(

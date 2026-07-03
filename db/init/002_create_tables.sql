@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS dq_config.dq_rules (
     rule_id BIGSERIAL PRIMARY KEY,
     rule_name TEXT NOT NULL,
     sql_text TEXT NOT NULL,
+    rule_fingerprint TEXT NULL,
     expected_result_type TEXT NOT NULL,
     expected_result_value NUMERIC NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS dq_config.dq_rules (
         OR expected_result_value IS NOT NULL
     )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dq_rules_rule_fingerprint
+ON dq_config.dq_rules (rule_fingerprint)
+WHERE rule_fingerprint IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dq_results.test_results (
     result_id BIGSERIAL PRIMARY KEY,

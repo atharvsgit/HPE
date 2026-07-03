@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
+from app.api import ai_rules_routes
 from app.api import routes
 from app.api import product_routes
 from app.main import app
@@ -62,6 +63,34 @@ def test_connect_database(monkeypatch) -> None:
     assert response.json()["dataset"]["records"] == 100000
 
 
+def test_create_database_rejects_duplicate(monkeypatch) -> None:
+    async def fake_create_database_connection(request):
+        raise product_routes.DuplicateDatabaseConnectionError(3, "Docker Demo Postgres")
+
+    monkeypatch.setattr(
+        product_routes,
+        "create_database_connection",
+        fake_create_database_connection,
+    )
+
+    response = client.post(
+        "/databases",
+        json={
+            "name": "Docker Demo Postgres",
+            "db_type": "postgresql",
+            "host": "postgres",
+            "port": 5432,
+            "database": "dq_test",
+            "username": "dq_executor",
+            "password": "dq_executor_password",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "DUPLICATE_DATABASE_CONNECTION"
+    assert response.json()["detail"]["existing_connection_id"] == 3
+
+
 def _saved_rule(rule_id: int = 1) -> SavedRuleResponse:
     now = datetime(2026, 5, 9, tzinfo=UTC)
     return SavedRuleResponse(
@@ -103,6 +132,29 @@ def test_create_rule(monkeypatch) -> None:
 
     assert response.status_code == 201
     assert response.json()["rule_id"] == 1
+
+
+def test_create_rule_rejects_duplicate(monkeypatch) -> None:
+    async def fake_create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
+        raise routes.registry.DuplicateRuleError(7, "Existing salary rule")
+
+    monkeypatch.setattr(routes.registry, "create_rule", fake_create_rule)
+
+    response = client.post(
+        "/rules",
+        json={
+            "rule_name": "No active employee has negative salary",
+            "sql": (
+                "SELECT COUNT(*) AS violation_count FROM business_data.employees "
+                "WHERE status = 'active' AND salary < 0;"
+            ),
+            "expected_result": {"type": "zero_violations"},
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "DUPLICATE_RULE"
+    assert response.json()["detail"]["existing_rule_id"] == 7
 
 
 def test_create_rule_rejects_unsafe_sql() -> None:
@@ -296,6 +348,49 @@ def test_update_job_can_clear_schedule(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["scheduler_status"] == "missing_schedule"
     assert response.json()["rule_name"] == "No active employee has negative salary"
+
+
+def test_create_job_rejects_duplicate(monkeypatch) -> None:
+    async def fake_create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
+        raise product_routes.registry.DuplicateRuleError(9, "Existing job")
+
+    monkeypatch.setattr(product_routes.registry, "create_rule", fake_create_rule)
+
+    response = client.post(
+        "/orchestrator/jobs",
+        json={
+            "database_connection_id": 1,
+            "rule_name": "No active employee has negative salary",
+            "sql": (
+                "SELECT COUNT(*) AS violation_count FROM business_data.employees "
+                "WHERE status = 'active' AND salary < 0;"
+            ),
+            "expected_result": {"type": "zero_violations"},
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "DUPLICATE_RULE"
+    assert response.json()["detail"]["existing_rule_id"] == 9
+
+
+def test_ai_save_rejects_duplicate(monkeypatch) -> None:
+    async def fake_approve_generation(generation_id: int, sql: str, approver: str):
+        raise ai_rules_routes.DuplicateRuleError(11, "Existing AI rule")
+
+    monkeypatch.setattr(ai_rules_routes, "approve_generation", fake_approve_generation)
+
+    response = client.post(
+        "/ai-rules/save",
+        json={
+            "generation_id": 1,
+            "reviewed_sql": "SELECT COUNT(*) AS violation_count FROM business_data.employees;",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "DUPLICATE_RULE"
+    assert response.json()["detail"]["existing_rule_id"] == 11
 
 
 def test_preserves_ad_hoc_rules_run(monkeypatch) -> None:

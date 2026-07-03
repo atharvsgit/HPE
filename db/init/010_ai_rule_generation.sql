@@ -20,8 +20,12 @@ CREATE TABLE IF NOT EXISTS dq_results.ai_rule_generations (
     -- Additional governance tracking from requirements
     original_prompt TEXT, -- To track original vs sanitized/enriched prompt if needed, though 'prompt' might suffice. Let's stick to prompt, but add original_prompt per requirement 8.
     reviewed_sql TEXT,
-    approval_timestamp TIMESTAMPTZ
+    approval_timestamp TIMESTAMPTZ,
+    saved_rule_id BIGINT REFERENCES dq_config.dq_rules(rule_id) ON DELETE SET NULL
 );
+
+ALTER TABLE dq_results.ai_rule_generations
+ADD COLUMN IF NOT EXISTS saved_rule_id BIGINT REFERENCES dq_config.dq_rules(rule_id) ON DELETE SET NULL;
 
 -- Ensure dq_executor does NOT have write access to this table.
 -- dq_api can read/write to this table.

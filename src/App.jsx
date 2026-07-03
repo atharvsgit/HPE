@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   approvePlan,
   createDatabase,
@@ -88,6 +88,14 @@ const notificationChannelOptions = [
   { label: 'Email', value: 'email' },
 ];
 
+function actionErrorMessage(error) {
+  const detail = error?.response?.data?.detail ?? error?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail?.message) return detail.message;
+  if (error?.message && typeof error.message === 'string') return error.message;
+  return 'Action failed.';
+}
+
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem('hpe-theme') || 'light');
 
@@ -119,6 +127,7 @@ export default function App() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const actionInFlight = useRef(false);
 
   const selectedDatabase = useMemo(
     () => databases.find((database) => String(database.id) === String(selectedDatabaseId)) || databases[0],
@@ -166,6 +175,8 @@ export default function App() {
   };
 
   const runAction = async (message, action, after = refresh) => {
+    if (actionInFlight.current) return null;
+    actionInFlight.current = true;
     setBusy(true);
     setError('');
     setStatus('');
@@ -176,11 +187,12 @@ export default function App() {
       await after?.(result);
       return result;
     } catch (actionError) {
-      const actionMessage = actionError?.response?.data?.detail || actionError.message || 'Action failed.';
+      const actionMessage = actionErrorMessage(actionError);
       setError(actionMessage);
       showToast('error', 'Action failed', actionMessage);
       return null;
     } finally {
+      actionInFlight.current = false;
       setBusy(false);
     }
   };

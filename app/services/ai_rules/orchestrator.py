@@ -2,7 +2,9 @@ import logging
 import json
 import re
 from sqlalchemy import text
+from app.daemon.registry import DuplicateRuleError, create_rule
 from app.db.session import metadata_engine
+from app.models.requests import ExpectedResult, SavedRuleCreateRequest
 from app.services.ai_rules.sanitizer import sanitize_prompt
 from app.services.ai_rules.schema_context import get_schema_context
 from app.services.ai_rules.prompts import SYSTEM_PROMPT
@@ -194,20 +196,37 @@ async def approve_generation(generation_id: int, sql: str, approver: str = "syst
     """Approve a generation, save edits, and create a saved rule."""
     # Validate the final SQL just in case
     validate_ai_generated_sql(sql)
-    
+
+    async with metadata_engine.connect() as conn:
+        res = await conn.execute(
+            text(
+                """
+                SELECT generated_sql, approved, saved_rule_id
+                FROM dq_results.ai_rule_generations
+                WHERE id = :id
+                """
+            ),
+            {"id": generation_id},
+        )
+        row = res.mappings().first()
+    if not row:
+        raise ValueError("Generation not found.")
+    if row["approved"]:
+        raise DuplicateRuleError(row["saved_rule_id"], f"AI approved rule {generation_id}")
+
+    edited = row["generated_sql"] != sql
+    saved_rule = await create_rule(
+        SavedRuleCreateRequest(
+            rule_name=f"AI approved rule {generation_id}",
+            sql=sql,
+            expected_result=ExpectedResult(type="zero_violations"),
+            notification_channels=["slack"],
+            severity="medium",
+        )
+    )
+
     async with metadata_engine.connect() as conn:
         async with conn.begin():
-            # Check if it was edited
-            res = await conn.execute(
-                text("SELECT generated_sql FROM dq_results.ai_rule_generations WHERE id = :id"),
-                {"id": generation_id}
-            )
-            row = res.mappings().first()
-            if not row:
-                raise ValueError("Generation not found.")
-            
-            edited = (row["generated_sql"] != sql)
-            
             await conn.execute(
                 text(
                     """
@@ -216,53 +235,26 @@ async def approve_generation(generation_id: int, sql: str, approver: str = "syst
                         approved_by = :approver,
                         approval_timestamp = NOW(),
                         reviewed_sql = :sql,
-                        edited_after_generation = :edited
+                        edited_after_generation = :edited,
+                        saved_rule_id = :saved_rule_id
                     WHERE id = :id
                     """
                 ),
-                {"id": generation_id, "approver": approver, "sql": sql, "edited": edited}
+                {
+                    "id": generation_id,
+                    "approver": approver,
+                    "sql": sql,
+                    "edited": edited,
+                    "saved_rule_id": saved_rule.rule_id,
+                },
             )
 
-            rule_id = (await conn.execute(
-                text(
-                    """
-                    INSERT INTO dq_config.dq_rules (
-                        rule_name,
-                        sql_text,
-                        expected_result_type,
-                        expected_result_value,
-                        is_enabled,
-                        schedule_cron,
-                        severity,
-                        notification_channels
-                    )
-                    VALUES (
-                        :rule_name,
-                        :sql_text,
-                        'zero_violations',
-                        NULL,
-                        true,
-                        NULL,
-                        'medium',
-                        CAST(:notification_channels AS jsonb)
-                    )
-                    RETURNING rule_id
-                    """
-                ),
-                {
-                    "rule_name": f"AI approved rule {generation_id}",
-                    "sql_text": sql,
-                    "notification_channels": json.dumps(["slack"]),
-                },
-            )).scalar_one()
-            
-            # Fetch updated row
             res2 = await conn.execute(
                 text("SELECT * FROM dq_results.ai_rule_generations WHERE id = :id"),
-                {"id": generation_id}
+                {"id": generation_id},
             )
             approved_row = dict(res2.mappings().first())
-            approved_row["saved_rule_id"] = rule_id
+            approved_row["saved_rule_id"] = saved_rule.rule_id
             return approved_row
 
 

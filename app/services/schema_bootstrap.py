@@ -42,6 +42,7 @@ async def ensure_product_schema() -> None:
                 rule_id BIGSERIAL PRIMARY KEY,
                 rule_name TEXT NOT NULL,
                 sql_text TEXT NOT NULL,
+                rule_fingerprint TEXT NULL,
                 expected_result_type TEXT NOT NULL,
                 expected_result_value NUMERIC NULL,
                 is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -90,6 +91,7 @@ async def ensure_product_schema() -> None:
                 database_name TEXT NOT NULL,
                 username TEXT NOT NULL,
                 password_secret TEXT NOT NULL,
+                connection_fingerprint TEXT NULL,
                 status TEXT NOT NULL DEFAULT 'untested',
                 last_tested_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -102,7 +104,22 @@ async def ensure_product_schema() -> None:
             ADD COLUMN IF NOT EXISTS table_name TEXT NULL,
             ADD COLUMN IF NOT EXISTS schedule_text TEXT NULL,
             ADD COLUMN IF NOT EXISTS notification_channels JSONB NOT NULL DEFAULT '["slack"]'::jsonb,
-            ADD COLUMN IF NOT EXISTS source_prompt TEXT NULL
+            ADD COLUMN IF NOT EXISTS source_prompt TEXT NULL,
+            ADD COLUMN IF NOT EXISTS rule_fingerprint TEXT NULL
+        """))
+        await conn.execute(text("""
+            ALTER TABLE dq_config.database_connections
+            ADD COLUMN IF NOT EXISTS connection_fingerprint TEXT NULL
+        """))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_database_connections_fingerprint
+            ON dq_config.database_connections (connection_fingerprint)
+            WHERE connection_fingerprint IS NOT NULL
+        """))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_dq_rules_rule_fingerprint
+            ON dq_config.dq_rules (rule_fingerprint)
+            WHERE rule_fingerprint IS NOT NULL
         """))
         await conn.execute(text("""
             ALTER TABLE dq_results.test_results
@@ -236,8 +253,13 @@ async def ensure_product_schema() -> None:
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 original_prompt TEXT,
                 reviewed_sql TEXT,
-                approval_timestamp TIMESTAMPTZ
+                approval_timestamp TIMESTAMPTZ,
+                saved_rule_id BIGINT REFERENCES dq_config.dq_rules(rule_id) ON DELETE SET NULL
             )
+        """))
+        await conn.execute(text("""
+            ALTER TABLE dq_results.ai_rule_generations
+            ADD COLUMN IF NOT EXISTS saved_rule_id BIGINT REFERENCES dq_config.dq_rules(rule_id) ON DELETE SET NULL
         """))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS dq_results.rule_improvement_suggestions (

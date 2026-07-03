@@ -6,9 +6,14 @@ from typing import Any, AsyncIterator
 from urllib.parse import quote_plus
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.db.session import executor_engine, metadata_engine
+from app.services.database_identity import (
+    build_database_connection_fingerprint,
+    database_connection_identity_params,
+)
 from app.models.product import (
     ColumnInfo,
     DatabaseConnectionCreate,
@@ -18,6 +23,18 @@ from app.models.product import (
     TableInfo,
 )
 from app.settings import get_settings
+
+
+class DuplicateDatabaseConnectionError(ValueError):
+    def __init__(self, existing_connection_id: int | None, existing_connection_name: str | None = None) -> None:
+        self.existing_connection_id = existing_connection_id
+        self.existing_connection_name = existing_connection_name
+        suffix = (
+            f" Existing database connection id: {existing_connection_id}."
+            if existing_connection_id is not None
+            else ""
+        )
+        super().__init__(f"An equivalent database connection already exists.{suffix}")
 
 
 def _engine_from_config(row: dict[str, Any]) -> AsyncEngine:
@@ -58,25 +75,55 @@ async def target_engine(database_connection_id: int | None) -> AsyncIterator[Asy
 async def create_database_connection(
     request: DatabaseConnectionCreate,
 ) -> DatabaseConnectionResponse:
-    async with metadata_engine.begin() as conn:
-        row = (await conn.execute(
-            text("""
-                INSERT INTO dq_config.database_connections
-                    (name, db_type, host, port, database_name, username, password_secret)
-                VALUES
-                    (:name, :db_type, :host, :port, :database, :username, :password)
-                RETURNING *
-            """),
-            {
-                "name": request.name,
-                "db_type": request.db_type,
-                "host": request.host,
-                "port": request.port,
-                "database": request.database,
-                "username": request.username,
-                "password": request.password,
-            },
-        )).mappings().one()
+    fingerprint = build_database_connection_fingerprint(request)
+    duplicate = await find_duplicate_database_connection(request, fingerprint=fingerprint)
+    if duplicate is not None:
+        raise DuplicateDatabaseConnectionError(duplicate.id, duplicate.name)
+
+    try:
+        async with metadata_engine.begin() as conn:
+            row = (await conn.execute(
+                text("""
+                    INSERT INTO dq_config.database_connections
+                        (
+                            name,
+                            db_type,
+                            host,
+                            port,
+                            database_name,
+                            username,
+                            password_secret,
+                            connection_fingerprint
+                        )
+                    VALUES
+                        (
+                            :name,
+                            :db_type,
+                            :host,
+                            :port,
+                            :database,
+                            :username,
+                            :password,
+                            :connection_fingerprint
+                        )
+                    RETURNING *
+                """),
+                {
+                    "name": request.name,
+                    "db_type": request.db_type,
+                    "host": request.host.strip(),
+                    "port": request.port,
+                    "database": request.database.strip(),
+                    "username": request.username.strip(),
+                    "password": request.password,
+                    "connection_fingerprint": fingerprint,
+                },
+            )).mappings().one()
+    except IntegrityError as exc:
+        duplicate = await get_database_connection_by_fingerprint(fingerprint)
+        if duplicate is not None:
+            raise DuplicateDatabaseConnectionError(duplicate.id, duplicate.name) from exc
+        raise
     return _database_response(row)
 
 
@@ -99,6 +146,50 @@ async def get_connection_row(connection_id: int) -> dict[str, Any] | None:
             {"id": connection_id},
         )).mappings().first()
     return dict(row) if row else None
+
+
+async def get_database_connection_by_fingerprint(
+    fingerprint: str,
+) -> DatabaseConnectionResponse | None:
+    async with metadata_engine.connect() as conn:
+        row = (await conn.execute(
+            text("""
+                SELECT *
+                FROM dq_config.database_connections
+                WHERE connection_fingerprint = :fingerprint
+                LIMIT 1
+            """),
+            {"fingerprint": fingerprint},
+        )).mappings().first()
+    return _database_response(row) if row else None
+
+
+async def find_duplicate_database_connection(
+    request: DatabaseConnectionCreate,
+    *,
+    fingerprint: str | None = None,
+) -> DatabaseConnectionResponse | None:
+    candidate_fingerprint = fingerprint or build_database_connection_fingerprint(request)
+    existing = await get_database_connection_by_fingerprint(candidate_fingerprint)
+    if existing is not None:
+        return existing
+
+    async with metadata_engine.connect() as conn:
+        rows = (await conn.execute(
+            text("""
+                SELECT *
+                FROM dq_config.database_connections
+                WHERE connection_fingerprint IS NULL
+                  AND lower(db_type) = :db_type
+                  AND lower(host) = :host
+                  AND port = :port
+                  AND lower(database_name) = :database
+                  AND lower(username) = :username
+                ORDER BY id
+            """),
+            database_connection_identity_params(request),
+        )).mappings().all()
+    return _database_response(rows[0]) if rows else None
 
 
 async def delete_database_connection(connection_id: int) -> bool:

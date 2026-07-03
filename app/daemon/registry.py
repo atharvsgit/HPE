@@ -4,8 +4,10 @@ import json
 from decimal import Decimal
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.daemon.cron import classify_scheduler_status, validate_cron_expression
+from app.daemon.rule_identity import build_rule_fingerprint
 from app.daemon.sql_safety import validate_safe_select
 from app.db.session import metadata_engine as db_engine
 from app.models.requests import ExpectedResult, RuleExecutionRequest, SavedRuleCreateRequest
@@ -16,6 +18,14 @@ from app.models.responses import (
 )
 
 UNSET = object()
+
+
+class DuplicateRuleError(ValueError):
+    def __init__(self, existing_rule_id: int | None, existing_rule_name: str | None = None) -> None:
+        self.existing_rule_id = existing_rule_id
+        self.existing_rule_name = existing_rule_name
+        suffix = f" Existing rule id: {existing_rule_id}." if existing_rule_id is not None else ""
+        super().__init__(f"An equivalent rule already exists.{suffix}")
 
 
 _RULE_SELECT = """
@@ -43,57 +53,71 @@ _RULE_SELECT = """
 async def create_rule(rule: SavedRuleCreateRequest) -> SavedRuleResponse:
     validate_safe_select(rule.sql)
     validate_cron_expression(rule.schedule_cron)
-    async with db_engine.begin() as conn:
-        result = await conn.execute(
-            text(
-                """
-                INSERT INTO dq_config.dq_rules (
-                    database_connection_id,
-                    rule_name,
-                    sql_text,
-                    expected_result_type,
-                    expected_result_value,
-                    is_enabled,
-                    schedule_cron,
-                    schedule_text,
-                    severity,
-                    table_name,
-                    notification_channels,
-                    source_prompt
-                )
-                VALUES (
-                    :database_connection_id,
-                    :rule_name,
-                    :sql_text,
-                    :expected_result_type,
-                    :expected_result_value,
-                    :is_enabled,
-                    :schedule_cron,
-                    :schedule_text,
-                    :severity,
-                    :table_name,
-                    CAST(:notification_channels AS jsonb),
-                    :source_prompt
-                )
-                RETURNING rule_id
-                """
-            ),
-            {
-                "database_connection_id": rule.database_connection_id,
-                "rule_name": rule.rule_name,
-                "sql_text": rule.sql,
-                "expected_result_type": rule.expected_result.type,
-                "expected_result_value": rule.expected_result.value,
-                "is_enabled": rule.is_enabled,
-                "schedule_cron": rule.schedule_cron,
-                "schedule_text": rule.schedule_text,
-                "severity": rule.severity,
-                "table_name": rule.table_name,
-                "notification_channels": json.dumps(rule.notification_channels),
-                "source_prompt": rule.source_prompt,
-            },
-        )
-        rule_id = result.scalar_one()
+    fingerprint = _fingerprint_for_create_request(rule)
+    duplicate_rule = await find_duplicate_rule(rule, fingerprint=fingerprint)
+    if duplicate_rule is not None:
+        raise DuplicateRuleError(duplicate_rule.rule_id, duplicate_rule.rule_name)
+
+    try:
+        async with db_engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    """
+                    INSERT INTO dq_config.dq_rules (
+                        database_connection_id,
+                        rule_name,
+                        sql_text,
+                        rule_fingerprint,
+                        expected_result_type,
+                        expected_result_value,
+                        is_enabled,
+                        schedule_cron,
+                        schedule_text,
+                        severity,
+                        table_name,
+                        notification_channels,
+                        source_prompt
+                    )
+                    VALUES (
+                        :database_connection_id,
+                        :rule_name,
+                        :sql_text,
+                        :rule_fingerprint,
+                        :expected_result_type,
+                        :expected_result_value,
+                        :is_enabled,
+                        :schedule_cron,
+                        :schedule_text,
+                        :severity,
+                        :table_name,
+                        CAST(:notification_channels AS jsonb),
+                        :source_prompt
+                    )
+                    RETURNING rule_id
+                    """
+                ),
+                {
+                    "database_connection_id": rule.database_connection_id,
+                    "rule_name": rule.rule_name,
+                    "sql_text": rule.sql,
+                    "rule_fingerprint": fingerprint,
+                    "expected_result_type": rule.expected_result.type,
+                    "expected_result_value": rule.expected_result.value,
+                    "is_enabled": rule.is_enabled,
+                    "schedule_cron": rule.schedule_cron,
+                    "schedule_text": rule.schedule_text,
+                    "severity": rule.severity,
+                    "table_name": rule.table_name,
+                    "notification_channels": json.dumps(rule.notification_channels),
+                    "source_prompt": rule.source_prompt,
+                },
+            )
+            rule_id = result.scalar_one()
+    except IntegrityError as exc:
+        duplicate_rule = await get_rule_by_fingerprint(fingerprint)
+        if duplicate_rule is not None:
+            raise DuplicateRuleError(duplicate_rule.rule_id, duplicate_rule.rule_name) from exc
+        raise
     saved_rule = await get_rule(rule_id)
     if saved_rule is None:
         raise RuntimeError("Saved rule could not be loaded after creation.")
@@ -190,6 +214,54 @@ async def update_rule(
     return await get_rule(rule_id)
 
 
+async def get_rule_by_fingerprint(fingerprint: str) -> SavedRuleResponse | None:
+    async with db_engine.connect() as conn:
+        result = await conn.execute(
+            text(f"{_RULE_SELECT} WHERE r.rule_fingerprint = :fingerprint LIMIT 1"),
+            {"fingerprint": fingerprint},
+        )
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return _saved_rule_from_row(row)
+
+
+async def find_duplicate_rule(
+    rule: SavedRuleCreateRequest,
+    *,
+    fingerprint: str | None = None,
+) -> SavedRuleResponse | None:
+    candidate_fingerprint = fingerprint or _fingerprint_for_create_request(rule)
+    existing = await get_rule_by_fingerprint(candidate_fingerprint)
+    if existing is not None:
+        return existing
+
+    async with db_engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                f"""
+                {_RULE_SELECT}
+                WHERE r.rule_fingerprint IS NULL
+                  AND r.database_connection_id IS NOT DISTINCT FROM :database_connection_id
+                  AND r.expected_result_type = :expected_result_type
+                  AND r.expected_result_value IS NOT DISTINCT FROM :expected_result_value
+                ORDER BY r.rule_id
+                """
+            ),
+            {
+                "database_connection_id": rule.database_connection_id,
+                "expected_result_type": rule.expected_result.type,
+                "expected_result_value": rule.expected_result.value,
+            },
+        )
+        candidates = [_saved_rule_from_row(row) for row in result.mappings().all()]
+
+    for candidate in candidates:
+        if _fingerprint_for_saved_rule(candidate) == candidate_fingerprint:
+            return candidate
+    return None
+
+
 async def delete_rule(rule_id: int) -> bool:
     async with db_engine.begin() as conn:
         await conn.execute(
@@ -279,6 +351,24 @@ def execution_request_from_saved_rule(rule: SavedRuleResponse) -> RuleExecutionR
         sql=rule.sql,
         expected_result=rule.expected_result,
         notification_channels=rule.notification_channels,
+    )
+
+
+def _fingerprint_for_create_request(rule: SavedRuleCreateRequest) -> str:
+    return build_rule_fingerprint(
+        database_connection_id=rule.database_connection_id,
+        sql=rule.sql,
+        expected_result_type=rule.expected_result.type,
+        expected_result_value=rule.expected_result.value,
+    )
+
+
+def _fingerprint_for_saved_rule(rule: SavedRuleResponse) -> str:
+    return build_rule_fingerprint(
+        database_connection_id=rule.database_connection_id,
+        sql=rule.sql,
+        expected_result_type=rule.expected_result.type,
+        expected_result_value=rule.expected_result.value,
     )
 
 

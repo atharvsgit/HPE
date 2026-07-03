@@ -31,7 +31,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from sqlalchemy import text
 
 from app.daemon.cron import CronValidationError
-from app.daemon.registry import create_rule
+from app.daemon.registry import DuplicateRuleError, create_rule
 from app.daemon.sql_safety import SQLSafetyError
 from app.db.session import metadata_engine
 from app.models.platform_requests import (
@@ -373,6 +373,15 @@ async def apply_suggestion(
 
     try:
         saved_rule = await create_rule(create_request)
+    except DuplicateRuleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "type": "DUPLICATE_RULE",
+                "message": str(exc),
+                "existing_rule_id": exc.existing_rule_id,
+            },
+        ) from exc
     except (CronValidationError, SQLSafetyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

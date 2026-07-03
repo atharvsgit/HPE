@@ -23,6 +23,11 @@ def _saved_rule() -> SavedRuleResponse:
     )
 
 
+def _duplicate_saved_rule(rule_id: int) -> SavedRuleResponse:
+    base_rule = _saved_rule()
+    return base_rule.model_copy(update={"rule_id": rule_id, "rule_name": f"Duplicate {rule_id}"})
+
+
 @pytest.mark.asyncio
 async def test_scheduled_rule_execution_calls_existing_executor_path(monkeypatch) -> None:
     calls = []
@@ -98,6 +103,22 @@ async def test_load_scheduled_rules_does_not_replace_unchanged_job(monkeypatch) 
     assert count == 1
     assert fake_scheduler.add_calls == []
     assert fake_scheduler.removed_jobs == []
+
+
+@pytest.mark.asyncio
+async def test_load_scheduled_rules_skips_equivalent_duplicate_rows(monkeypatch) -> None:
+    fake_scheduler = FakeScheduler()
+
+    async def fake_list_rules():
+        return [_saved_rule(), _duplicate_saved_rule(8)]
+
+    monkeypatch.setattr(scheduler.registry, "list_rules", fake_list_rules)
+
+    count = await scheduler.load_scheduled_rules(fake_scheduler)
+
+    assert count == 1
+    assert len(fake_scheduler.add_calls) == 1
+    assert fake_scheduler.add_calls[0][1]["id"] == "dq_rule_7"
 
 
 @pytest.mark.asyncio
