@@ -374,6 +374,25 @@ def test_create_job_rejects_duplicate(monkeypatch) -> None:
     assert response.json()["detail"]["existing_rule_id"] == 9
 
 
+def test_assistant_plan_rejects_duplicate(monkeypatch) -> None:
+    async def fake_create_assistant_plan(request):
+        raise product_routes.registry.DuplicateRuleError(4, "Salary not negative")
+
+    monkeypatch.setattr(product_routes, "create_assistant_plan", fake_create_assistant_plan)
+
+    response = client.post(
+        "/assistant/plan",
+        json={
+            "prompt": "Every day check that salary should not be negative in employees and alert on Slack",
+            "database_id": 1,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "DUPLICATE_RULE"
+    assert response.json()["detail"]["existing_rule_id"] == 4
+
+
 def test_ai_save_rejects_duplicate(monkeypatch) -> None:
     async def fake_approve_generation(generation_id: int, sql: str, approver: str):
         raise ai_rules_routes.DuplicateRuleError(11, "Existing AI rule")

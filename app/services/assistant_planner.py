@@ -9,10 +9,11 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.daemon import registry
 from app.daemon.sql_safety import SQLSafetyError
 from app.db.session import metadata_engine
 from app.models.product import AssistantPlanRequest, AssistantPlanResponse
-from app.models.requests import ExpectedResult
+from app.models.requests import ExpectedResult, SavedRuleCreateRequest
 from app.services.ai_rules.validator import validate_ai_generated_sql
 from app.services.database_connections import (
     get_connection_row,
@@ -80,6 +81,23 @@ async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanR
         schedule_cron = None
     sql = str(raw_plan["sql"]).strip().rstrip(";")
     validate_ai_generated_sql(sql)
+    expected_result = ExpectedResult(**raw_plan.get("expected_result", {"type": "zero_violations"}))
+    duplicate_rule = await registry.find_duplicate_rule(
+        SavedRuleCreateRequest(
+            database_connection_id=database_id,
+            rule_name=str(raw_plan["rule_name"]),
+            sql=sql,
+            expected_result=expected_result,
+            schedule_text=raw_plan.get("schedule_text") or "manual",
+            schedule_cron=schedule_cron,
+            severity=raw_plan.get("severity", "critical"),
+            notification_channels=raw_plan.get("notification_channels") or ["slack"],
+            table_name=raw_plan["table_name"],
+        )
+    )
+    if duplicate_rule is not None:
+        raise registry.DuplicateRuleError(duplicate_rule.rule_id, duplicate_rule.rule_name)
+
     dry_run = await _dry_run_sql(database_id, sql)
     generation_id = await _log_generation(request.prompt, raw_plan, source)
 
@@ -90,7 +108,7 @@ async def create_assistant_plan(request: AssistantPlanRequest) -> AssistantPlanR
         table_name=raw_plan["table_name"],
         rule_name=raw_plan["rule_name"],
         sql=sql,
-        expected_result=ExpectedResult(**raw_plan.get("expected_result", {"type": "zero_violations"})),
+        expected_result=expected_result,
         schedule_text=raw_plan.get("schedule_text") or "manual",
         schedule_cron=schedule_cron,
         severity=raw_plan.get("severity", "critical"),

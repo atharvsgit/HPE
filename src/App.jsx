@@ -91,8 +91,19 @@ const notificationChannelOptions = [
 function actionErrorMessage(error) {
   const detail = error?.response?.data?.detail ?? error?.data?.detail;
   if (typeof detail === 'string') return detail;
-  if (detail?.message) return detail.message;
+  if (detail?.type === 'DUPLICATE_RULE') {
+    const suffix = detail.existing_rule_id ? ` Existing rule id: ${detail.existing_rule_id}.` : '';
+    return `${detail.message || 'An equivalent rule already exists.'}${suffix}`;
+  }
+  if (detail?.type === 'DUPLICATE_DATABASE_CONNECTION') {
+    const suffix = detail.existing_connection_id
+      ? ` Existing database connection id: ${detail.existing_connection_id}.`
+      : '';
+    return `${detail.message || 'An equivalent database connection already exists.'}${suffix}`;
+  }
+  if (typeof detail?.message === 'string') return detail.message;
   if (error?.message && typeof error.message === 'string') return error.message;
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
   return 'Action failed.';
 }
 

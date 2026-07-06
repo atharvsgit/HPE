@@ -110,6 +110,15 @@ async def update_notification_settings(request: NotificationSettingsUpdateReques
 async def assistant_plan(request: AssistantPlanRequest) -> AssistantPlanResponse:
     try:
         return await create_assistant_plan(request)
+    except registry.DuplicateRuleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "DUPLICATE_RULE",
+                "message": str(exc),
+                "existing_rule_id": exc.existing_rule_id,
+            },
+        ) from exc
     except (ValueError, SQLSafetyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
